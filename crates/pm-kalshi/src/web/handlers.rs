@@ -269,7 +269,6 @@ pub async fn post_resume(State(state): State<Arc<AppState>>) -> StatusCode {
 pub struct BacktestRequest {
     pub start: String,
     pub end: String,
-    pub data_dir: Option<String>,
     pub capital: Option<f64>,
     pub max_positions: Option<usize>,
     pub max_position: Option<u64>,
@@ -618,7 +617,6 @@ pub async fn post_session_start(
             let backtest_req = BacktestRequest {
                 start,
                 end,
-                data_dir: None,
                 capital: Some(config.initial_capital),
                 max_positions: Some(config.max_positions),
                 max_position: Some((config.initial_capital * config.max_position_pct) as u64),

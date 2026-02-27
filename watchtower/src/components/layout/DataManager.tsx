@@ -54,16 +54,6 @@ function formatNumber(n: number): string {
   return n.toString();
 }
 
-function formatBytes(n: number): string {
-  const units = ["B", "KB", "MB", "GB"];
-  let i = 0;
-  while (n >= 1024 && i < units.length - 1) {
-    n /= 1024;
-    i++;
-  }
-  return `${n.toFixed(1)} ${units[i]}`;
-}
-
 function formatPhase(phase?: string | null): string {
   if (!phase) return "working";
   if (phase === "fetching_trades") return "fetching trades";
@@ -73,19 +63,9 @@ function formatPhase(phase?: string | null): string {
   return phase;
 }
 
-function getDateRange(daysBack: number): { start: string; end: string } {
-  const end = new Date();
-  const start = new Date();
-  start.setDate(start.getDate() - daysBack);
-  return {
-    start: start.toISOString().split("T")[0] ?? "",
-    end: end.toISOString().split("T")[0] ?? "",
-  };
-}
-
 export function DataManager() {
   const colors = useColors();
-  const { closeModeMenu, menuIndex } = useModeStore();
+  const { menuIndex } = useModeStore();
 
   const [availability, setAvailability] = useState<DataAvailability | null>(
     null
@@ -135,42 +115,6 @@ export function DataManager() {
           fetchAvailability();
         }
       }
-    } catch {
-      // ignore
-    }
-  };
-
-  const startFetch = async () => {
-    const preset = DATE_RANGE_PRESETS[menuIndex];
-    if (!preset) return;
-    const { start, end } = getDateRange(preset.getDays());
-    const tradesPerDay = TRADES_PER_DAY_PRESETS[tradesPresetIndex]?.value ?? 10000;
-
-    try {
-      const res = await fetch(`${API_BASE}/api/data/fetch`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          start_date: start,
-          end_date: end,
-          trades_per_day: tradesPerDay,
-          fetch_markets: true,
-          fetch_trades: true,
-        }),
-      });
-
-      if (!res.ok) {
-        const data = (await res.json()) as { message?: string };
-        setError(data.message || "failed to start fetch");
-      }
-    } catch (e) {
-      setError("failed to start data fetch");
-    }
-  };
-
-  const cancelFetch = async () => {
-    try {
-      await fetch(`${API_BASE}/api/data/cancel`, { method: "POST" });
     } catch {
       // ignore
     }

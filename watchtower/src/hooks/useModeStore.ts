@@ -202,7 +202,7 @@ export const useModeStore = create<ModeStore>((set, get) => ({
   },
 
   adjustEditValue: (delta) => {
-    const { editingConfig, editFieldIndex, viewMode } = get();
+    const { editingConfig, editFieldIndex } = get();
     if (!editingConfig) return;
 
     if (editFieldIndex >= EDIT_FIELDS.length) {
@@ -446,7 +446,7 @@ export const useModeStore = create<ModeStore>((set, get) => ({
   },
 
   transitionToMode: async (target) => {
-    const { viewMode, sessionStatus, stopSession, setViewMode, setMenuScreen, startSession } = get();
+    const { viewMode, sessionStatus, stopSession, setViewMode, startSession } = get();
 
     // if we're already running a different mode, stop it first
     if (sessionStatus === "running" && viewMode !== "idle" && viewMode !== target) {
