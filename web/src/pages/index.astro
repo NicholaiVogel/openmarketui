@@ -1,0 +1,740 @@
+---
+import Layout from '../layouts/Layout.astro';
+import '../styles/global.css';
+---
+
+<Layout title="OpenMarketUI — Algorithmic Trading with Guardrails" description="Open source tools for building, backtesting, and deploying trading strategies on prediction markets. Kalshi, Polymarket, and more.">
+  <div class="min-h-screen bg-white text-[#0a0a0a] selection:bg-[#0a0a0a] selection:text-white overflow-x-hidden">
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- NAV — floating island                       -->
+    <!-- ═══════════════════════════════════════════ -->
+    <div id="nav-wrapper" class="fixed top-0 left-0 right-0 z-50 flex justify-center pt-4 px-4 pointer-events-none transition-transform duration-400 ease-[cubic-bezier(0.16,1,0.3,1)]">
+      <nav class="pointer-events-auto bg-white/85 backdrop-blur-xl border border-neutral-200/60 shadow-[0_2px_20px_rgba(0,0,0,0.04)] rounded-full px-3 md:px-5 h-14 flex items-center gap-2 md:gap-6 max-w-fit">
+
+        <!-- logo -->
+        <a href="/" class="flex items-center gap-2.5 pl-2 shrink-0">
+          <img src="/logo.png" alt="OpenMarketUI" class="w-7 h-7" />
+          <span class="text-sm font-semibold tracking-[0.02em] hidden sm:inline">OpenMarketUI</span>
+        </a>
+
+        <!-- divider -->
+        <div class="hidden md:block w-px h-6 bg-neutral-200/70"></div>
+
+        <!-- links -->
+        <div class="hidden md:flex items-center gap-1">
+          <a href="#pipeline" class="text-[13px] text-neutral-500 hover:text-[#0a0a0a] transition-colors px-3 py-1.5 rounded-full hover:bg-neutral-100/60">Pipeline</a>
+          <a href="#architecture" class="text-[13px] text-neutral-500 hover:text-[#0a0a0a] transition-colors px-3 py-1.5 rounded-full hover:bg-neutral-100/60">Architecture</a>
+          <a href="#garden" class="text-[13px] text-neutral-500 hover:text-[#0a0a0a] transition-colors px-3 py-1.5 rounded-full hover:bg-neutral-100/60">Garden</a>
+        </div>
+
+        <!-- divider -->
+        <div class="hidden md:block w-px h-6 bg-neutral-200/70"></div>
+
+        <!-- actions -->
+        <a href="https://github.com/SignetAI/openmarketui" class="flex items-center gap-1.5 bg-[#0a0a0a] text-white text-[13px] font-medium px-4 py-2 rounded-full hover:bg-neutral-800 transition-colors shrink-0">
+          GitHub
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
+        </a>
+
+        <!-- mobile menu button -->
+        <button id="nav-mobile-toggle" class="md:hidden flex flex-col gap-[5px] p-2 -mr-1" aria-label="Menu">
+          <div class="w-5 h-[1.5px] bg-[#0a0a0a] transition-all origin-center" id="nav-line-1"></div>
+          <div class="w-5 h-[1.5px] bg-[#0a0a0a] transition-all origin-center" id="nav-line-2"></div>
+        </button>
+      </nav>
+    </div>
+
+    <!-- mobile menu overlay -->
+    <div id="nav-mobile-menu" class="fixed inset-0 z-40 bg-white/95 backdrop-blur-lg flex flex-col items-center justify-center gap-8 opacity-0 pointer-events-none transition-opacity duration-300">
+      <a href="#pipeline" class="nav-mobile-link text-2xl font-display font-light text-neutral-500 hover:text-[#0a0a0a] transition-colors">Pipeline</a>
+      <a href="#architecture" class="nav-mobile-link text-2xl font-display font-light text-neutral-500 hover:text-[#0a0a0a] transition-colors">Architecture</a>
+      <a href="#garden" class="nav-mobile-link text-2xl font-display font-light text-neutral-500 hover:text-[#0a0a0a] transition-colors">Garden</a>
+      <div class="h-px w-12 bg-neutral-200 my-2"></div>
+      <a href="https://github.com/SignetAI/openmarketui" class="text-lg font-mono text-neutral-400 hover:text-[#0a0a0a] transition-colors">GitHub</a>
+    </div>
+
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- HERO                                        -->
+    <!-- ═══════════════════════════════════════════ -->
+    <section class="relative pt-36 pb-20 md:pt-44 md:pb-32 lg:pt-52 lg:pb-40 px-6 md:px-12 lg:px-20 max-w-[1400px] mx-auto">
+
+      <!-- halftone texture - right side, drifting -->
+      <div class="absolute top-10 right-0 w-[500px] h-[700px] lg:w-[650px] lg:h-[900px] opacity-[0.08] halftone-md animate-dots-drift halftone-fade-r pointer-events-none" aria-hidden="true"></div>
+      <!-- secondary halftone - bottom left, static -->
+      <div class="absolute bottom-0 left-0 w-[300px] h-[300px] opacity-[0.04] halftone-sm pointer-events-none" style="-webkit-mask-image: radial-gradient(ellipse at bottom left, black 20%, transparent 70%); mask-image: radial-gradient(ellipse at bottom left, black 20%, transparent 70%);" aria-hidden="true"></div>
+
+      <div class="relative z-10">
+        <!-- micro-label -->
+        <p class="animate-fade-up text-[10px] tracking-[0.3em] uppercase text-neutral-400 mb-6 font-mono">
+          Open Source Trading Toolkit
+        </p>
+
+        <!-- headline -->
+        <h1 class="animate-fade-up delay-100 font-display font-light text-5xl md:text-7xl lg:text-[5.5rem] xl:text-[6.5rem] leading-[1.05] tracking-[-0.03em] max-w-4xl mb-10">
+          Algorithmic trading<br class="hidden md:inline" />
+          with guardrails.
+        </h1>
+
+        <!-- subtext -->
+        <p class="animate-fade-up delay-300 text-neutral-500 text-base md:text-lg leading-relaxed max-w-xl mb-16">
+          Build heuristic strategies, backtest against real market data, and deploy
+          to prediction markets — all from an interface designed for composability
+          and control.
+        </p>
+
+        <!-- platform tags + pipeline -->
+        <div class="animate-fade-up delay-500 flex flex-col sm:flex-row gap-12 sm:gap-20">
+          <div>
+            <p class="text-[10px] tracking-[0.25em] uppercase text-neutral-300 mb-3 font-mono">Platforms</p>
+            <div class="flex gap-3">
+              <span class="text-xs font-mono px-3 py-1.5 border border-neutral-200 rounded-full">Kalshi</span>
+              <span class="text-xs font-mono px-3 py-1.5 border border-neutral-200 rounded-full">Polymarket</span>
+            </div>
+          </div>
+          <div>
+            <p class="text-[10px] tracking-[0.25em] uppercase text-neutral-300 mb-3 font-mono">Pipeline</p>
+            <p class="text-xs font-mono text-neutral-500 flex items-center gap-2 flex-wrap">
+              <span class="text-[#0a0a0a] font-medium">Source</span>
+              <span class="text-neutral-300">&rarr;</span>
+              <span>Filter</span>
+              <span class="text-neutral-300">&rarr;</span>
+              <span>Scorer</span>
+              <span class="text-neutral-300">&rarr;</span>
+              <span>Selector</span>
+              <span class="text-neutral-300">&rarr;</span>
+              <span class="text-[#0a0a0a] font-medium">Executor</span>
+            </p>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+
+    <!-- thin rule -->
+    <div class="max-w-[1400px] mx-auto px-6 md:px-12 lg:px-20">
+      <div class="h-px bg-neutral-100"></div>
+    </div>
+
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- LIVE PIPELINE — the terminal hero            -->
+    <!-- ═══════════════════════════════════════════ -->
+    <section id="pipeline" class="relative py-20 md:py-32 px-6 md:px-12 lg:px-20 max-w-[1400px] mx-auto">
+
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-20">
+
+        <!-- left: context -->
+        <div class="lg:col-span-4 flex flex-col justify-center">
+          <p class="text-[10px] tracking-[0.3em] uppercase text-neutral-400 mb-4 font-mono">Live Pipeline</p>
+          <h2 class="font-display text-3xl md:text-4xl leading-tight mb-6">
+            Watch your strategy<br />think in real time.
+          </h2>
+          <p class="text-sm text-neutral-500 leading-relaxed mb-8">
+            Every market candidate flows through your filters and scorers.
+            The pipeline shows you exactly why a trade was taken — or rejected.
+          </p>
+          <div class="space-y-4">
+            <div class="flex items-start gap-3">
+              <div class="w-1.5 h-1.5 rounded-full bg-[#0a0a0a] mt-1.5 shrink-0"></div>
+              <p class="text-xs text-neutral-600 leading-relaxed">Trait-based pipeline — swap any stage without touching the rest</p>
+            </div>
+            <div class="flex items-start gap-3">
+              <div class="w-1.5 h-1.5 rounded-full bg-[#0a0a0a] opacity-50 mt-1.5 shrink-0"></div>
+              <p class="text-xs text-neutral-600 leading-relaxed">Ensemble scorers combine signals with configurable weights</p>
+            </div>
+            <div class="flex items-start gap-3">
+              <div class="w-1.5 h-1.5 rounded-full bg-[#0a0a0a] opacity-25 mt-1.5 shrink-0"></div>
+              <p class="text-xs text-neutral-600 leading-relaxed">Circuit breakers halt trading when drawdown limits are hit</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- right: terminal -->
+        <div class="lg:col-span-8">
+          <div class="relative bg-[#fafafa] border border-neutral-200 rounded-2xl overflow-hidden">
+            <!-- terminal chrome -->
+            <div class="flex items-center gap-3 px-6 py-4 border-b border-neutral-100">
+              <div class="flex gap-1.5">
+                <div class="w-2.5 h-2.5 rounded-full bg-neutral-200"></div>
+                <div class="w-2.5 h-2.5 rounded-full bg-neutral-200"></div>
+                <div class="w-2.5 h-2.5 rounded-full bg-neutral-200"></div>
+              </div>
+              <span class="text-[10px] font-mono tracking-wider text-neutral-400 ml-2">openmarketui / paper-trading</span>
+            </div>
+
+            <!-- terminal content -->
+            <div class="p-6 md:p-8 font-mono text-xs leading-[2.2] overflow-x-auto">
+              <p class="text-neutral-400 mb-6">$ cargo run --release -p pm-kalshi -- paper --config config.toml</p>
+
+              <div class="space-y-0.5">
+                <p class="text-neutral-400">
+                  <span class="inline-block w-20 text-neutral-300">init</span>
+                  pipeline ready &middot; 8 scorers &middot; 4 groups &middot; $10,000 equity
+                </p>
+                <p class="text-neutral-400">
+                  <span class="inline-block w-20 text-neutral-300">source</span>
+                  KXBTC-26FEB25 &nbsp; 0.72 &rarr; 0.68 &nbsp; vol: 12,400
+                </p>
+
+                <div class="my-4 h-px bg-neutral-100"></div>
+
+                <p class="text-neutral-400 terminal-line terminal-line-pass">
+                  <span class="inline-block w-20 text-neutral-300">filter</span>
+                  LiquidityFilter &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class="text-neutral-500">pass</span> &nbsp; depth: $24.2k
+                </p>
+                <p class="text-neutral-400 terminal-line terminal-line-pass">
+                  <span class="inline-block w-20 text-neutral-300">filter</span>
+                  SpreadFilter &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class="text-neutral-500">pass</span> &nbsp; spread: 0.02
+                </p>
+                <p class="text-neutral-400 terminal-line terminal-line-pass">
+                  <span class="inline-block w-20 text-neutral-300">filter</span>
+                  TimeToCloseFilter &nbsp;&nbsp;&nbsp; <span class="text-neutral-500">pass</span> &nbsp; 4h 22m remaining
+                </p>
+
+                <div class="my-4 h-px bg-neutral-100"></div>
+
+                <p class="text-neutral-500 terminal-line terminal-line-score">
+                  <span class="inline-block w-20 text-neutral-300">scorer</span>
+                  MomentumScorer &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class="text-[#0a0a0a] font-medium">0.81</span>
+                </p>
+                <p class="text-neutral-500 terminal-line terminal-line-score">
+                  <span class="inline-block w-20 text-neutral-300">scorer</span>
+                  BollingerMeanRev &nbsp;&nbsp;&nbsp; <span class="text-[#0a0a0a] font-medium">0.34</span>
+                </p>
+                <p class="text-neutral-500 terminal-line terminal-line-score">
+                  <span class="inline-block w-20 text-neutral-300">scorer</span>
+                  VolumeScorer &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class="text-[#0a0a0a] font-medium">0.67</span>
+                </p>
+                <p class="text-neutral-500 terminal-line terminal-line-score">
+                  <span class="inline-block w-20 text-neutral-300">scorer</span>
+                  OrderFlowScorer &nbsp;&nbsp;&nbsp;&nbsp; <span class="text-[#0a0a0a] font-medium">0.72</span>
+                </p>
+
+                <div class="my-4 h-px bg-neutral-100"></div>
+
+                <p class="text-neutral-500 terminal-line terminal-line-signal">
+                  <span class="inline-block w-20 text-neutral-300">ensemble</span>
+                  WeightedScorer &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; composite: <span class="text-[#0a0a0a] font-semibold">0.71</span>
+                </p>
+                <p class="text-[#0a0a0a] font-medium terminal-line terminal-line-signal">
+                  <span class="inline-block w-20 text-neutral-500">signal</span>
+                  &rarr; LONG @ 0.68 &nbsp;&middot;&nbsp; size: $340 &nbsp;&middot;&nbsp; risk: 3.4%
+                </p>
+              </div>
+
+              <!-- blinking cursor -->
+              <div class="mt-6 flex items-center gap-1">
+                <span class="text-neutral-300">$</span>
+                <span class="w-2 h-4 bg-[#0a0a0a] inline-block" style="animation: blink 1.2s step-end infinite;"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- ARCHITECTURE                                -->
+    <!-- ═══════════════════════════════════════════ -->
+    <section id="architecture" class="relative py-20 md:py-32 px-6 md:px-12 lg:px-20 max-w-[1400px] mx-auto">
+
+      <!-- halftone backdrop -->
+      <div class="absolute top-0 left-0 w-[500px] h-[700px] opacity-[0.06] halftone-lg halftone-fade pointer-events-none" aria-hidden="true"></div>
+      <div class="absolute bottom-10 right-0 w-[350px] h-[500px] opacity-[0.04] halftone-md pointer-events-none" style="-webkit-mask-image: linear-gradient(to left, black 10%, transparent 70%); mask-image: linear-gradient(to left, black 10%, transparent 70%);" aria-hidden="true"></div>
+
+      <div class="relative z-10">
+        <div class="max-w-xl mb-12">
+          <p class="text-[10px] tracking-[0.3em] uppercase text-neutral-400 mb-4 font-mono">Architecture</p>
+          <h2 class="font-display text-3xl md:text-4xl leading-tight mb-6">
+            Designed like a garden.
+          </h2>
+          <p class="text-sm text-neutral-500 leading-relaxed">
+            Strategies are specimens. Scorers grow in beds. Trades are harvests.
+            The whole system is built on composable traits — swap any piece
+            without uprooting the rest.
+          </p>
+        </div>
+
+        <!-- architecture grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-px bg-neutral-100 border border-neutral-100 rounded-2xl overflow-hidden">
+
+          <!-- pm-core -->
+          <div class="bg-white p-8 md:p-10 hover-lift">
+            <p class="font-mono text-[10px] tracking-[0.25em] uppercase text-neutral-300 mb-4">pm-core</p>
+            <h3 class="text-sm font-semibold mb-2">Foundation</h3>
+            <p class="text-xs text-neutral-500 leading-relaxed">
+              MarketCandidate, TradingContext, and all pipeline traits.
+              The types everything else builds on.
+            </p>
+          </div>
+
+          <!-- pm-garden -->
+          <div class="bg-white p-8 md:p-10 hover-lift">
+            <p class="font-mono text-[10px] tracking-[0.25em] uppercase text-neutral-300 mb-4">pm-garden</p>
+            <h3 class="text-sm font-semibold mb-2">The Garden</h3>
+            <p class="text-xs text-neutral-500 leading-relaxed">
+              Scorers and filters organized into beds by strategy family —
+              momentum, mean reversion, volume, ensemble.
+            </p>
+          </div>
+
+          <!-- pm-engine -->
+          <div class="bg-white p-8 md:p-10 hover-lift">
+            <p class="font-mono text-[10px] tracking-[0.25em] uppercase text-neutral-300 mb-4">pm-engine</p>
+            <h3 class="text-sm font-semibold mb-2">Engine</h3>
+            <p class="text-xs text-neutral-500 leading-relaxed">
+              Risk management, position sizing, circuit breakers,
+              and the backtesting harness.
+            </p>
+          </div>
+
+          <!-- pm-store -->
+          <div class="bg-white p-8 md:p-10 hover-lift">
+            <p class="font-mono text-[10px] tracking-[0.25em] uppercase text-neutral-300 mb-4">pm-store</p>
+            <h3 class="text-sm font-semibold mb-2">Root Cellar</h3>
+            <p class="text-xs text-neutral-500 leading-relaxed">
+              SQLite persistence layer. Market data, trade history,
+              backtest results — all local, all yours.
+            </p>
+          </div>
+
+          <!-- pm-server -->
+          <div class="bg-white p-8 md:p-10 hover-lift">
+            <p class="font-mono text-[10px] tracking-[0.25em] uppercase text-neutral-300 mb-4">pm-server</p>
+            <h3 class="text-sm font-semibold mb-2">Greenhouse</h3>
+            <p class="text-xs text-neutral-500 leading-relaxed">
+              REST + WebSocket server. Real-time state streaming
+              to watchtower and web dashboards.
+            </p>
+          </div>
+
+          <!-- pm-kalshi -->
+          <div class="bg-white p-8 md:p-10 hover-lift">
+            <p class="font-mono text-[10px] tracking-[0.25em] uppercase text-neutral-300 mb-4">pm-kalshi</p>
+            <h3 class="text-sm font-semibold mb-2">Kalshi Engine</h3>
+            <p class="text-xs text-neutral-500 leading-relaxed">
+              Full Kalshi integration — API client, paper trading,
+              backtesting, and live execution.
+            </p>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- GARDEN BEDS — scorer families               -->
+    <!-- ═══════════════════════════════════════════ -->
+    <section id="garden" class="relative py-20 md:py-28 px-6 md:px-12 lg:px-20 max-w-[1400px] mx-auto">
+
+      <!-- halftone accent strip -->
+      <div class="absolute top-0 right-20 w-[400px] h-[200px] opacity-[0.05] halftone-md pointer-events-none" style="-webkit-mask-image: radial-gradient(ellipse at top right, black 20%, transparent 60%); mask-image: radial-gradient(ellipse at top right, black 20%, transparent 60%);" aria-hidden="true"></div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-20">
+
+        <!-- context -->
+        <div class="lg:col-span-5">
+          <p class="text-[10px] tracking-[0.3em] uppercase text-neutral-400 mb-4 font-mono">Scorer Beds</p>
+          <h2 class="font-display text-3xl md:text-4xl leading-tight mb-6">
+            Compose your edge.
+          </h2>
+          <p class="text-sm text-neutral-500 leading-relaxed mb-10">
+            Mix and weight scorers from different strategy families. Each scorer writes
+            to the candidate's score map — the ensemble combines them into a final signal.
+          </p>
+
+          <!-- weight distribution viz -->
+          <div class="border border-neutral-100 rounded-xl p-6 bg-[#fafafa]">
+            <p class="text-[10px] tracking-[0.25em] uppercase text-neutral-300 mb-5 font-mono">Weight Distribution</p>
+            <div class="space-y-3">
+              <div class="flex items-center gap-4">
+                <span class="font-mono text-[11px] text-neutral-500 w-32 shrink-0">momentum</span>
+                <div class="flex-1 h-2 bg-neutral-100 rounded-full overflow-hidden">
+                  <div class="h-full bg-[#0a0a0a] rounded-full" style="width: 35%"></div>
+                </div>
+                <span class="font-mono text-[11px] text-neutral-400 w-10 text-right">0.35</span>
+              </div>
+              <div class="flex items-center gap-4">
+                <span class="font-mono text-[11px] text-neutral-500 w-32 shrink-0">mean_reversion</span>
+                <div class="flex-1 h-2 bg-neutral-100 rounded-full overflow-hidden">
+                  <div class="h-full bg-[#0a0a0a] opacity-70 rounded-full" style="width: 25%"></div>
+                </div>
+                <span class="font-mono text-[11px] text-neutral-400 w-10 text-right">0.25</span>
+              </div>
+              <div class="flex items-center gap-4">
+                <span class="font-mono text-[11px] text-neutral-500 w-32 shrink-0">volume</span>
+                <div class="flex-1 h-2 bg-neutral-100 rounded-full overflow-hidden">
+                  <div class="h-full bg-[#0a0a0a] opacity-50 rounded-full" style="width: 20%"></div>
+                </div>
+                <span class="font-mono text-[11px] text-neutral-400 w-10 text-right">0.20</span>
+              </div>
+              <div class="flex items-center gap-4">
+                <span class="font-mono text-[11px] text-neutral-500 w-32 shrink-0">ensemble</span>
+                <div class="flex-1 h-2 bg-neutral-100 rounded-full overflow-hidden">
+                  <div class="h-full bg-[#0a0a0a] opacity-30 rounded-full" style="width: 20%"></div>
+                </div>
+                <span class="font-mono text-[11px] text-neutral-400 w-10 text-right">0.20</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- scorer list -->
+        <div class="lg:col-span-7 overflow-x-auto">
+          <div class="border border-neutral-100 rounded-2xl overflow-hidden min-w-[520px]">
+            <!-- table header -->
+            <div class="grid grid-cols-[24px_1fr_1fr_auto] gap-4 px-6 py-3 bg-[#fafafa] border-b border-neutral-100 font-mono text-[10px] tracking-[0.2em] uppercase text-neutral-400">
+              <div></div>
+              <div>Name</div>
+              <div>Group</div>
+              <div class="text-right w-14">Weight</div>
+            </div>
+
+            <!-- scorer rows -->
+            {[
+              { name: 'MomentumScorer', group: 'momentum', weight: '0.15' },
+              { name: 'TimeDecayScorer', group: 'momentum', weight: '0.10' },
+              { name: 'MTFMomentum', group: 'momentum', weight: '0.10' },
+              { name: 'BollingerMeanRev', group: 'mean_reversion', weight: '0.15' },
+              { name: 'MeanReversion', group: 'mean_reversion', weight: '0.10' },
+              { name: 'VolumeScorer', group: 'volume', weight: '0.10' },
+              { name: 'VPINScorer', group: 'volume', weight: '0.05' },
+              { name: 'OrderFlowScorer', group: 'volume', weight: '0.05' },
+              { name: 'WeightedScorer', group: 'ensemble', weight: '0.10' },
+              { name: 'BayesianEnsemble', group: 'ensemble', weight: '0.10' },
+            ].map((scorer) => (
+              <div class="grid grid-cols-[24px_1fr_1fr_auto] gap-4 px-6 py-3 border-b border-neutral-50 hover:bg-[#fafafa] transition-colors text-xs">
+                <div class="flex items-center">
+                  <div class="w-2 h-2 rounded-full bg-[#0a0a0a] opacity-60"></div>
+                </div>
+                <div class="font-mono font-medium text-[#0a0a0a]">{scorer.name}</div>
+                <div class="font-mono text-neutral-400">{scorer.group}</div>
+                <div class="font-mono text-right text-neutral-600 w-14">{scorer.weight}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- thin rule -->
+    <div class="max-w-[1400px] mx-auto px-6 md:px-12 lg:px-20">
+      <div class="h-px bg-neutral-100"></div>
+    </div>
+
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- WATCHTOWER + TOOLS                          -->
+    <!-- ═══════════════════════════════════════════ -->
+    <section class="relative py-20 md:py-28 px-6 md:px-12 lg:px-20 max-w-[1400px] mx-auto">
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+        <!-- watchtower card — full TUI mockup -->
+        <div class="lg:col-span-2 border border-neutral-200 rounded-2xl relative overflow-hidden hover-lift">
+          <div class="absolute top-0 right-0 w-80 h-80 opacity-[0.06] halftone-sm pointer-events-none" aria-hidden="true"></div>
+
+          <div class="p-8 md:p-10 pb-6">
+            <p class="font-mono text-[10px] tracking-[0.25em] uppercase text-neutral-300 mb-6">Interface</p>
+            <h3 class="font-display text-2xl md:text-3xl leading-tight mb-4">Watchtower</h3>
+            <p class="text-sm text-neutral-500 leading-relaxed max-w-xl">
+              Terminal UI built with OpenTUI. Monitor positions, engine state,
+              scorer weights, and trade history — all from your terminal.
+              Ships with 35+ themes.
+            </p>
+          </div>
+
+          <!-- TUI mockup — monochrome -->
+          <div class="mx-4 md:mx-6 mb-4 md:mb-6 rounded-xl overflow-hidden border border-neutral-200 bg-[#fafafa] font-mono text-[11px] leading-[1.7]">
+
+            <!-- TUI header -->
+            <div class="flex justify-between px-4 py-1.5 bg-neutral-100">
+              <span>
+                <span class="text-[#0a0a0a]">OpenMarketUI</span>
+                <span class="text-neutral-300"> / </span>
+                <span class="text-[#205ea6]">watchtower</span>
+              </span>
+              <span>
+                <span class="text-[#66800b] font-medium">PAPER</span>
+                <span class="text-[#66800b]"> +$124.80 (+1.25%)</span>
+                <span class="text-neutral-400"> │ Ctrl+P</span>
+              </span>
+            </div>
+
+            <!-- portfolio stats -->
+            <div class="flex gap-6 px-4 py-1 bg-neutral-100">
+              <span><span class="text-neutral-400">cash </span><span class="text-[#0a0a0a]">$1,937.20</span></span>
+              <span><span class="text-neutral-400">invested </span><span class="text-[#0a0a0a]">$8,062.80</span></span>
+              <span><span class="text-neutral-400">equity </span><span class="text-[#66800b]">$10,124.80</span></span>
+              <span><span class="text-neutral-400">return </span><span class="text-[#66800b]">+1.25%</span></span>
+              <span><span class="text-neutral-400">P&L </span><span class="text-[#66800b]">+$124.80</span></span>
+            </div>
+
+            <!-- tab bar -->
+            <div class="flex justify-center gap-0 px-4 py-1.5 border-b border-neutral-200">
+              <span><span class="text-[#205ea6] font-medium">1</span><span class="text-[#0a0a0a]"> overview</span></span>
+              <span class="text-neutral-200"> &nbsp;│&nbsp; </span>
+              <span><span class="text-neutral-400">2</span><span class="text-neutral-400"> positions</span></span>
+              <span class="text-neutral-200"> &nbsp;│&nbsp; </span>
+              <span><span class="text-neutral-400">3</span><span class="text-neutral-400"> trades</span></span>
+              <span class="text-neutral-200"> &nbsp;│&nbsp; </span>
+              <span><span class="text-neutral-400">4</span><span class="text-neutral-400"> engine</span></span>
+              <span class="text-neutral-200"> &nbsp;│&nbsp; </span>
+              <span><span class="text-neutral-400">5</span><span class="text-neutral-400"> decisions</span></span>
+              <span class="text-neutral-200"> &nbsp;│&nbsp; </span>
+              <span><span class="text-neutral-400">6</span><span class="text-neutral-400"> timeline</span></span>
+              <span class="text-neutral-200"> &nbsp;│&nbsp; </span>
+              <span><span class="text-neutral-400">7</span><span class="text-neutral-400"> data</span></span>
+            </div>
+
+            <!-- stats row -->
+            <div class="flex gap-4 px-4 py-1.5">
+              <span><span class="text-neutral-400">scorers </span><span class="text-[#0a0a0a]">8</span></span>
+              <span><span class="text-[#66800b]">●</span><span class="text-neutral-400"> active </span><span class="text-[#0a0a0a]">8</span></span>
+              <span><span class="text-neutral-400">groups </span><span class="text-[#0a0a0a]">4</span></span>
+              <span><span class="text-neutral-400">total weight </span><span class="text-[#0a0a0a]">1.00</span></span>
+              <span><span class="text-neutral-400">equity </span><span class="text-[#66800b]">$10,124.80</span></span>
+            </div>
+
+            <!-- strategies panel -->
+            <div class="mx-3 mt-1 mb-2 border border-neutral-200 rounded">
+              <div class="px-3 py-0.5 text-[10px] text-neutral-400 border-b border-neutral-200">strategies</div>
+              <!-- table header -->
+              <div class="grid px-3 py-1 text-neutral-400" style="grid-template-columns: 20px 1fr 1fr 80px 60px 100px;">
+                <span></span><span>name</span><span>group</span><span>status</span><span>weight</span><span>distribution</span>
+              </div>
+              <!-- rows -->
+              {[
+                { name: 'MomentumScorer', group: 'momentum', weight: 0.15, bar: 3 },
+                { name: 'TimeDecayScorer', group: 'momentum', weight: 0.10, bar: 2 },
+                { name: 'MTFMomentum', group: 'momentum', weight: 0.10, bar: 2 },
+                { name: 'BollingerMeanRev', group: 'mean_reversion', weight: 0.15, bar: 3 },
+                { name: 'MeanReversion', group: 'mean_reversion', weight: 0.10, bar: 2 },
+                { name: 'VolumeScorer', group: 'volume', weight: 0.10, bar: 2 },
+                { name: 'VPINScorer', group: 'volume', weight: 0.05, bar: 1 },
+                { name: 'OrderFlowScorer', group: 'volume', weight: 0.05, bar: 1 },
+              ].map((s) => (
+                <div class="grid px-3 py-0.5" style={`grid-template-columns: 20px 1fr 1fr 80px 60px 100px;`}>
+                  <span class="text-[#66800b]">●</span>
+                  <span class="text-[#0a0a0a]">{s.name}</span>
+                  <span class="text-neutral-400">{s.group}</span>
+                  <span class="text-[#66800b]">active</span>
+                  <span class="text-[#0a0a0a]">{s.weight.toFixed(2)}</span>
+                  <span class="text-[#205ea6]">{'█'.repeat(s.bar)}<span class="text-neutral-200">{'░'.repeat(6 - s.bar)}</span></span>
+                </div>
+              ))}
+            </div>
+
+            <!-- market pulse panel -->
+            <div class="mx-3 mt-1 mb-2 border border-neutral-200 rounded">
+              <div class="px-3 py-0.5 text-[10px] text-neutral-400 border-b border-neutral-200">market pulse</div>
+              <div class="flex px-3 py-1.5">
+                <!-- chart area -->
+                <div class="flex-1">
+                  <div class="flex justify-between mb-1">
+                    <span><span class="text-neutral-400">equity </span><span class="text-[#0a0a0a]">$10,124.80</span></span>
+                    <span class="text-[#66800b]">+$124.80 (+1.25%)</span>
+                  </div>
+                  <div class="text-[10px] text-neutral-400">high $10,248.00</div>
+                  <div class="text-[10px] text-[#66800b] whitespace-pre" style="line-height: 1.2;">{'█░░█████░░████████░░██████████░██████████████████████'}<br /><span class="text-neutral-300">{'░░░░░░'}</span>{'██░░██░░░░██░░██░░░░████░████'}<span class="text-neutral-300">{'░░░░░░░░░░░░░░░░░░'}</span><br /><span class="text-neutral-300">{'░░░░░░░░░░░░░░░░░░░░░░░░░░░'}</span>{'██'}<span class="text-neutral-300">{'░░░░░░░░░░░░░░░░░░░░░░░'}</span><br /><span class="text-neutral-300">{'░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░'}</span></div>
+                  <div class="text-[10px] text-neutral-400">low $9,876.00</div>
+                </div>
+                <!-- trades tape -->
+                <div class="w-36 ml-4 pl-4 border-l border-neutral-200">
+                  <div class="text-[#205ea6] font-medium mb-1">trades</div>
+                  <div class="grid text-neutral-400" style="grid-template-columns: 40px 50px auto;">
+                    <span>price</span><span>size</span><span>time</span>
+                  </div>
+                  {[
+                    { price: '0.72', size: '340', time: '2m', win: true },
+                    { price: '0.68', size: '220', time: '8m', win: true },
+                    { price: '0.54', size: '180', time: '15m', win: false },
+                    { price: '0.81', size: '400', time: '22m', win: true },
+                  ].map((f) => (
+                    <div class="grid" style={`grid-template-columns: 40px 50px auto;`}>
+                      <span class={f.win ? 'text-[#66800b]' : 'text-[#af3029]'}>{f.price}</span>
+                      <span class="text-[#0a0a0a]">{f.size}</span>
+                      <span class="text-neutral-400">{f.time} ago</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <!-- TUI status bar -->
+            <div class="flex justify-between px-4 py-1 bg-neutral-100 text-neutral-400">
+              <span>
+                <span class="text-[#66800b]">●</span> live
+                <span class="text-neutral-200"> │ </span>
+                pos <span class="text-[#0a0a0a]">3</span>
+                <span class="text-neutral-200"> │ </span>
+                Monochrome
+              </span>
+              <span>
+                overview
+                <span class="text-neutral-200"> │ </span>
+                14:32:08
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- QUICKSTART                                  -->
+    <!-- ═══════════════════════════════════════════ -->
+    <section class="relative py-20 md:py-28 px-6 md:px-12 lg:px-20 max-w-[1400px] mx-auto">
+
+      <!-- halftone background panel -->
+      <div class="absolute inset-0 mx-6 md:mx-12 lg:mx-20 bg-[#0a0a0a] rounded-3xl overflow-hidden">
+        <div class="absolute inset-0 opacity-[0.12] halftone-lg animate-dots-drift" aria-hidden="true" style="background-image: radial-gradient(circle, #fff 1.2px, transparent 1.2px); background-size: 8px 8px;"></div>
+      </div>
+
+      <div class="relative z-10 py-16 md:py-24 px-8 md:px-16">
+        <div class="max-w-2xl mx-auto text-center">
+          <p class="text-[10px] tracking-[0.3em] uppercase text-neutral-500 mb-6 font-mono">Get Started</p>
+          <h2 class="font-display text-3xl md:text-4xl lg:text-5xl text-white leading-tight mb-8">
+            Clone, build, trade.
+          </h2>
+          <p class="text-neutral-400 text-sm leading-relaxed mb-12 max-w-md mx-auto">
+            OpenMarketUI is a Rust workspace. One clone gets you the full pipeline,
+            backtesting engine, and terminal UI.
+          </p>
+        </div>
+
+        <!-- install commands -->
+        <div class="max-w-xl mx-auto space-y-3 font-mono text-sm">
+          <div class="flex items-center gap-4 bg-white/5 rounded-lg px-5 py-3 border border-white/10">
+            <span class="text-neutral-600 select-none">$</span>
+            <code class="text-neutral-300">git clone https://github.com/SignetAI/openmarketui</code>
+          </div>
+          <div class="flex items-center gap-4 bg-white/5 rounded-lg px-5 py-3 border border-white/10">
+            <span class="text-neutral-600 select-none">$</span>
+            <code class="text-neutral-300">cargo build && cargo test</code>
+          </div>
+          <div class="flex items-center gap-4 bg-white/5 rounded-lg px-5 py-3 border border-white/10">
+            <span class="text-neutral-600 select-none">$</span>
+            <code class="text-neutral-300">just kalshi-backtest</code>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- FOOTER                                      -->
+    <!-- ═══════════════════════════════════════════ -->
+    <footer class="py-16 md:py-24 px-6 md:px-12 lg:px-20 max-w-[1400px] mx-auto">
+      <div class="h-px bg-neutral-100 mb-12"></div>
+
+      <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
+        <div class="flex items-center gap-3">
+          <img src="/logo.png" alt="OpenMarketUI" class="w-7 h-7" />
+          <span class="text-sm font-semibold tracking-[0.04em]">OpenMarketUI</span>
+        </div>
+
+        <div class="flex flex-wrap gap-8">
+          <a href="https://github.com/SignetAI/openmarketui" class="text-xs font-mono tracking-wider text-neutral-400 hover:text-[#0a0a0a] transition-colors">
+            GitHub
+          </a>
+          <a href="#pipeline" class="text-xs font-mono tracking-wider text-neutral-400 hover:text-[#0a0a0a] transition-colors">
+            Pipeline
+          </a>
+          <a href="#architecture" class="text-xs font-mono tracking-wider text-neutral-400 hover:text-[#0a0a0a] transition-colors">
+            Architecture
+          </a>
+          <a href="#garden" class="text-xs font-mono tracking-wider text-neutral-400 hover:text-[#0a0a0a] transition-colors">
+            Garden
+          </a>
+        </div>
+      </div>
+
+      <div class="mt-12 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <p class="text-[10px] tracking-[0.25em] uppercase text-neutral-300 font-mono">
+          Signet AI
+        </p>
+        <p class="text-[10px] tracking-[0.15em] text-neutral-300 font-mono">
+          Open source &middot; MIT License
+        </p>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- nav scroll behavior + mobile menu -->
+  <script>
+    (function() {
+      const nav = document.getElementById('nav-wrapper');
+      const toggle = document.getElementById('nav-mobile-toggle');
+      const menu = document.getElementById('nav-mobile-menu');
+      const line1 = document.getElementById('nav-line-1');
+      const line2 = document.getElementById('nav-line-2');
+      if (!nav || !toggle || !menu) return;
+
+      // scroll hide/show
+      let lastY = 0;
+      let hidden = false;
+      const threshold = 60;
+
+      window.addEventListener('scroll', () => {
+        const y = window.scrollY;
+        const delta = Math.abs(y - lastY);
+        if (delta < threshold) return;
+
+        const down = y > lastY;
+        lastY = y;
+
+        // always show at top
+        if (y < 100) {
+          if (hidden) {
+            nav.style.transform = 'translateY(0)';
+            hidden = false;
+          }
+          return;
+        }
+
+        if (down && !hidden) {
+          nav.style.transform = 'translateY(-120%)';
+          hidden = true;
+        } else if (!down && hidden) {
+          nav.style.transform = 'translateY(0)';
+          hidden = false;
+        }
+      }, { passive: true });
+
+      // mobile menu toggle
+      let menuOpen = false;
+      toggle.addEventListener('click', () => {
+        menuOpen = !menuOpen;
+        if (menuOpen) {
+          menu.classList.remove('opacity-0', 'pointer-events-none');
+          menu.classList.add('opacity-100', 'pointer-events-auto');
+          line1.style.transform = 'rotate(45deg) translateY(3.25px)';
+          line2.style.transform = 'rotate(-45deg) translateY(-3.25px)';
+          document.body.style.overflow = 'hidden';
+        } else {
+          menu.classList.add('opacity-0', 'pointer-events-none');
+          menu.classList.remove('opacity-100', 'pointer-events-auto');
+          line1.style.transform = '';
+          line2.style.transform = '';
+          document.body.style.overflow = '';
+        }
+      });
+
+      // close mobile menu on link click
+      menu.querySelectorAll('a').forEach(a => {
+        a.addEventListener('click', () => {
+          if (menuOpen) toggle.click();
+        });
+      });
+    })();
+  </script>
+</Layout>

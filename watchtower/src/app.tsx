@@ -60,6 +60,7 @@ export function App() {
     beds,
     positions,
     recentFills,
+    equityCurve,
     portfolio,
     engineStatus,
     circuitBreaker,
@@ -124,7 +125,13 @@ export function App() {
       {/* content area */}
       <box style={{ flexDirection: "column", flexGrow: 1, padding: 1 }}>
           {activeTab === "overview" && (
-            <GardenOverview beds={displayBeds} portfolio={portfolio} engineStatus={engineStatus} />
+            <GardenOverview
+              beds={displayBeds}
+              portfolio={portfolio}
+              engineStatus={engineStatus}
+              recentFills={recentFills}
+              equityCurve={equityCurve}
+            />
           )}
           {activeTab === "positions" && (
             <CurrentHarvest

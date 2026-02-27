@@ -40,6 +40,7 @@ export interface BacktestProgress {
   elapsedSecs?: number;
   error?: string;
   liveSnapshot?: BacktestLiveSnapshot;
+  liveEquitySeries?: number[];
 }
 
 export interface BacktestLiveSnapshot {

@@ -1,0 +1,162 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Instrument Sans", system-ui, sans-serif;
+  --font-display: "Outfit", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", monospace;
+}
+
+@layer base {
+  html {
+    background-color: #fff;
+    color: #0a0a0a;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    min-height: 100vh;
+    line-height: 1.6;
+  }
+
+  ::selection {
+    background-color: #0a0a0a;
+    color: #fff;
+  }
+}
+
+/* halftone dot pattern - the signature texture */
+@layer utilities {
+  .halftone-sm {
+    background-image: radial-gradient(circle, #0a0a0a 0.5px, transparent 0.5px);
+    background-size: 4px 4px;
+  }
+
+  .halftone-md {
+    background-image: radial-gradient(circle, #0a0a0a 0.8px, transparent 0.8px);
+    background-size: 6px 6px;
+  }
+
+  .halftone-lg {
+    background-image: radial-gradient(circle, #0a0a0a 1.2px, transparent 1.2px);
+    background-size: 8px 8px;
+  }
+
+  .halftone-fade {
+    -webkit-mask-image: linear-gradient(to bottom, black 20%, transparent 90%);
+    mask-image: linear-gradient(to bottom, black 20%, transparent 90%);
+  }
+
+  .halftone-fade-r {
+    -webkit-mask-image: linear-gradient(to right, black 10%, transparent 80%);
+    mask-image: linear-gradient(to right, black 10%, transparent 80%);
+  }
+}
+
+/* stagger entrance animations */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(40px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes type-line {
+  from { width: 0; }
+  to { width: 100%; }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes dots-drift {
+  0% { background-position: 0 0; }
+  100% { background-position: 40px 40px; }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.6s ease both;
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-dots-drift {
+  animation: dots-drift 20s linear infinite;
+}
+
+/* stagger delays */
+.delay-100 { animation-delay: 100ms; }
+.delay-200 { animation-delay: 200ms; }
+.delay-300 { animation-delay: 300ms; }
+.delay-400 { animation-delay: 400ms; }
+.delay-500 { animation-delay: 500ms; }
+.delay-600 { animation-delay: 600ms; }
+.delay-700 { animation-delay: 700ms; }
+.delay-800 { animation-delay: 800ms; }
+.delay-1000 { animation-delay: 1000ms; }
+.delay-1200 { animation-delay: 1200ms; }
+
+/* terminal styling */
+.terminal-line::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 12px;
+  vertical-align: middle;
+}
+
+.terminal-line-pass::before {
+  background-color: #0a0a0a;
+  opacity: 0.2;
+}
+
+.terminal-line-score::before {
+  background-color: #0a0a0a;
+  opacity: 0.5;
+}
+
+.terminal-line-signal::before {
+  background-color: #0a0a0a;
+}
+
+/* hover lift */
+.hover-lift {
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.06);
+}

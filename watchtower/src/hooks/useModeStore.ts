@@ -112,6 +112,20 @@ const EDIT_FIELDS = [
 
 export { EDIT_FIELDS };
 
+const MAX_LIVE_EQUITY_POINTS = 256;
+
+function appendLiveEquityPoint(series: number[], equity: number): number[] {
+  const last = series[series.length - 1];
+  if (last === equity) {
+    return series;
+  }
+  const next = [...series, equity];
+  if (next.length > MAX_LIVE_EQUITY_POINTS) {
+    return next.slice(next.length - MAX_LIVE_EQUITY_POINTS);
+  }
+  return next;
+}
+
 export const useModeStore = create<ModeStore>((set, get) => ({
   viewMode: "idle",
   sessionStatus: "idle",
@@ -397,7 +411,7 @@ export const useModeStore = create<ModeStore>((set, get) => ({
         set({
           sessionStatus: "error",
           sessionError: errorMsg,
-          backtestProgress: { status: "failed", error: errorMsg },
+          backtestProgress: { status: "failed", error: errorMsg, liveEquitySeries: [] },
         });
       }
     } catch (err) {
@@ -406,7 +420,7 @@ export const useModeStore = create<ModeStore>((set, get) => ({
       set({
         sessionStatus: "error",
         sessionError: errorMsg,
-        backtestProgress: { status: "failed", error: errorMsg },
+        backtestProgress: { status: "failed", error: errorMsg, liveEquitySeries: [] },
       });
     }
   },
@@ -489,6 +503,7 @@ export const useModeStore = create<ModeStore>((set, get) => ({
         status: "running",
         phase: "starting...",
         progressPct: 0,
+        liveEquitySeries: [],
       },
       menuScreen: "closed",
     });
@@ -530,20 +545,29 @@ export const useModeStore = create<ModeStore>((set, get) => ({
       if (!response.ok) return;
 
       const data = (await response.json()) as BacktestStatusData;
-      const progress: BacktestProgress = {
-        status: data.status,
-        phase: data.phase,
-        progressPct: data.progress_pct,
-        elapsedSecs: data.elapsed_secs,
-        error: data.error,
-        liveSnapshot: data.live_snapshot,
-      };
+      set((state) => {
+        const priorSeries = state.backtestProgress.liveEquitySeries ?? [];
+        const nextSeries =
+          data.status === "running" && data.live_snapshot
+            ? appendLiveEquityPoint(priorSeries, data.live_snapshot.equity)
+            : priorSeries;
 
-      set({ backtestProgress: progress });
+        const progress: BacktestProgress = {
+          status: data.status,
+          phase: data.phase,
+          progressPct: data.progress_pct,
+          elapsedSecs: data.elapsed_secs,
+          error: data.error,
+          liveSnapshot: data.live_snapshot,
+          liveEquitySeries: nextSeries,
+        };
 
-      if (progress.status === "running") {
+        return { backtestProgress: progress };
+      });
+
+      if (data.status === "running") {
         setTimeout(() => get().pollBacktestStatus(), 1000);
-      } else if (progress.status === "complete") {
+      } else if (data.status === "complete") {
         const resultResponse = await fetch(`${API_BASE}/api/backtest/result`);
         if (resultResponse.ok) {
           const result = (await resultResponse.json()) as BacktestResultData;
@@ -573,7 +597,7 @@ export const useModeStore = create<ModeStore>((set, get) => ({
 
   dismissBacktestResult: () => {
     set({
-      backtestProgress: { status: "idle" },
+      backtestProgress: { status: "idle", liveEquitySeries: [] },
       backtestResult: null,
     });
   },
@@ -582,7 +606,7 @@ export const useModeStore = create<ModeStore>((set, get) => ({
     try {
       await fetch(`${API_BASE}/api/backtest/stop`, { method: "POST" });
       set({
-        backtestProgress: { status: "idle" },
+        backtestProgress: { status: "idle", liveEquitySeries: [] },
         backtestResult: null,
         sessionStatus: "idle",
         viewMode: "idle",
