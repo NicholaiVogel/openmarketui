@@ -511,6 +511,7 @@ export const useModeStore = create<ModeStore>((set, get) => ({
         return_pct: number;
         total_pnl: number;
         open_positions: number;
+        fills_this_step: number;
       };
     }
 

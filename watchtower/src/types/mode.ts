@@ -50,6 +50,7 @@ export interface BacktestLiveSnapshot {
   return_pct: number;
   total_pnl: number;
   open_positions: number;
+  fills_this_step: number;
 }
 
 export interface BacktestEquityPoint {

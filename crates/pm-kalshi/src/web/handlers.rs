@@ -302,6 +302,7 @@ pub struct BacktestLiveSnapshotResponse {
     pub return_pct: f64,
     pub total_pnl: f64,
     pub open_positions: usize,
+    pub fills_this_step: usize,
 }
 
 #[derive(Serialize)]
@@ -489,6 +490,7 @@ pub async fn get_backtest_status(
             return_pct: s.return_pct,
             total_pnl: s.total_pnl,
             open_positions: s.open_positions,
+            fills_this_step: s.fills_this_step,
         });
 
     Json(BacktestStatusResponse {

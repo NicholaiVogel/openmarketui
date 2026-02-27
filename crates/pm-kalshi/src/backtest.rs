@@ -242,6 +242,7 @@ pub struct BacktestLiveSnapshot {
     pub return_pct: f64,
     pub total_pnl: f64,
     pub open_positions: usize,
+    pub fills_this_step: usize,
 }
 
 impl Backtester {
@@ -357,7 +358,7 @@ impl Backtester {
         );
 
         if let Some(ref callback) = self.step_callback {
-            callback(self.snapshot_for_context(&context, &HashMap::new()));
+            callback(self.snapshot_for_context(&context, &HashMap::new(), 0));
         }
 
         let mut step: u64 = 0;
@@ -375,6 +376,7 @@ impl Backtester {
                 &mut context.trading_history,
                 &mut metrics,
             );
+            let mut fills_this_step = resolutions.len();
             for (ticker, result, pnl) in resolutions {
                 info!(ticker = %ticker, result = ?result, pnl = ?pnl, "market resolved");
             }
@@ -426,6 +428,7 @@ impl Backtester {
 
                     context.trading_history.push(trade.clone());
                     metrics.record_trade(&trade, &category);
+                    fills_this_step += 1;
                 }
             }
 
@@ -467,13 +470,14 @@ impl Backtester {
 
                     context.trading_history.push(trade.clone());
                     metrics.record_trade(&trade, &category);
+                    fills_this_step += 1;
                 }
             }
 
             let market_prices = self.get_current_prices(eval_time);
             metrics.record(eval_time, &context.portfolio, &market_prices);
             if let Some(ref callback) = self.step_callback {
-                callback(self.snapshot_for_context(&context, &market_prices));
+                callback(self.snapshot_for_context(&context, &market_prices, fills_this_step));
             }
 
             step += 1;
@@ -492,13 +496,18 @@ impl Backtester {
             &mut context.trading_history,
             &mut metrics,
         );
+        let final_fills_this_step = resolutions.len();
         for (ticker, result, pnl) in resolutions {
             info!(ticker = %ticker, result = ?result, pnl = ?pnl, "market resolved");
         }
 
         if let Some(ref callback) = self.step_callback {
             let market_prices = self.get_current_prices(self.config.end_time);
-            callback(self.snapshot_for_context(&context, &market_prices));
+            callback(self.snapshot_for_context(
+                &context,
+                &market_prices,
+                final_fills_this_step,
+            ));
         }
 
         info!(
@@ -527,6 +536,7 @@ impl Backtester {
         &self,
         context: &TradingContext,
         market_prices: &HashMap<String, Decimal>,
+        fills_this_step: usize,
     ) -> BacktestLiveSnapshot {
         let invested = context
             .portfolio
@@ -566,6 +576,7 @@ impl Backtester {
             return_pct,
             total_pnl,
             open_positions: context.portfolio.positions.len(),
+            fills_this_step,
         }
     }
 }
