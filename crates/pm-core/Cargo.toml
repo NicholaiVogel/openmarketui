@@ -1,0 +1,13 @@
+[package]
+name = "pm-core"
+description = "Core types and traits for prediction market trading"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+rust_decimal.workspace = true
+uuid.workspace = true

@@ -1,0 +1,15 @@
+[package]
+name = "pm-garden"
+description = "The garden - trading strategy specimens organized into beds"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pm-core = { path = "../pm-core" }
+
+async-trait.workspace = true
+serde.workspace = true
+chrono.workspace = true
+rust_decimal.workspace = true
+tracing.workspace = true
+toml.workspace = true

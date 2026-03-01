@@ -1,0 +1,22 @@
+{
+  "name": "openmarketui-watchtower",
+  "module": "src/index.tsx",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun run --watch src/index.tsx",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@opentui/core": "^0.1.75",
+    "@opentui/react": "^0.1.75",
+    "react": "^19.2.3",
+    "zustand": "^5.0.0"
+  }
+}

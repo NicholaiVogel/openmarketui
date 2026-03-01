@@ -1,0 +1,20 @@
+{
+  "name": "openmarketui",
+  "private": true,
+  "workspaces": [
+    "watchtower",
+    "web"
+  ],
+  "scripts": {
+    "dev": "turbo dev",
+    "kalshi-dev": "bash -lc 'set -euo pipefail; trap \"kill 0\" EXIT INT TERM; cargo run --release -p pm-kalshi -- paper --config config.toml & PM_SERVER_URL=ws://127.0.0.1:3030/ws bun --cwd watchtower dev & wait'",
+    "build": "turbo build",
+    "typecheck": "turbo typecheck",
+    "watchtower": "turbo dev --filter=openmarketui-watchtower",
+    "web": "turbo dev --filter=openmarketui-web"
+  },
+  "devDependencies": {
+    "turbo": "^2"
+  },
+  "packageManager": "bun@1.3.5"
+}

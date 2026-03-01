@@ -1,0 +1,15 @@
+[package]
+name = "pm-engine"
+description = "Shared engine components for prediction market trading - risk management, execution, backtesting"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pm-core = { path = "../pm-core" }
+
+tokio.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+rust_decimal.workspace = true
+serde.workspace = true
+tracing.workspace = true

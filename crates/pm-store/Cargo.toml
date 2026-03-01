@@ -1,0 +1,17 @@
+[package]
+name = "pm-store"
+description = "Persistence layer for prediction market trading - the root cellar"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pm-core = { path = "../pm-core" }
+
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+rust_decimal.workspace = true
+anyhow.workspace = true
+
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "chrono"] }

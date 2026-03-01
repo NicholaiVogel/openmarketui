@@ -1,0 +1,21 @@
+[package]
+name = "pm-server"
+description = "The watchtower - REST + WebSocket server to observe and control the garden"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pm-core = { path = "../pm-core" }
+pm-store = { path = "../pm-store" }
+pm-garden = { path = "../pm-garden" }
+
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+rust_decimal.workspace = true
+
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+futures = "0.3"

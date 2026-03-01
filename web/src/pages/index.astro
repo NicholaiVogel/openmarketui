@@ -10,7 +10,7 @@ import '../styles/global.css';
     <!-- NAV — floating island                       -->
     <!-- ═══════════════════════════════════════════ -->
     <div id="nav-wrapper" class="fixed top-0 left-0 right-0 z-50 flex justify-center pt-4 px-4 pointer-events-none transition-transform duration-400 ease-[cubic-bezier(0.16,1,0.3,1)]">
-      <nav class="pointer-events-auto bg-white/85 backdrop-blur-xl border border-neutral-200/60 shadow-[0_2px_20px_rgba(0,0,0,0.04)] rounded-full px-3 md:px-5 h-14 flex items-center gap-2 md:gap-6 max-w-fit">
+      <nav class="pointer-events-auto bg-white/85 backdrop-blur-xl border border-neutral-200/60 shadow-[0_2px_20px_rgba(0,0,0,0.12)] rounded-[12px] px-3 md:px-5 h-14 flex items-center gap-2 md:gap-6 max-w-fit">
 
         <!-- logo -->
         <a href="/" class="flex items-center gap-2.5 pl-2 shrink-0">
@@ -32,7 +32,7 @@ import '../styles/global.css';
         <div class="hidden md:block w-px h-6 bg-neutral-200/70"></div>
 
         <!-- actions -->
-        <a href="https://github.com/SignetAI/openmarketui" class="flex items-center gap-1.5 bg-[#0a0a0a] text-white text-[13px] font-medium px-4 py-2 rounded-full hover:bg-neutral-800 transition-colors shrink-0">
+        <a href="https://github.com/SignetAI/openmarketui" class="flex items-center gap-1.5 bg-[#55a179] text-white text-[13px] font-medium px-4 py-2 rounded-[12px] hover:bg-[#478e68] transition-colors shrink-0">
           GitHub
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
         </a>
@@ -73,37 +73,37 @@ import '../styles/global.css';
 
         <!-- headline -->
         <h1 class="animate-fade-up delay-100 font-display font-light text-5xl md:text-7xl lg:text-[5.5rem] xl:text-[6.5rem] leading-[1.05] tracking-[-0.03em] max-w-4xl mb-10">
-          Algorithmic trading<br class="hidden md:inline" />
-          with guardrails.
+          Test your strategy<br class="hidden md:inline" />
+          with agents.
         </h1>
 
         <!-- subtext -->
         <p class="animate-fade-up delay-300 text-neutral-500 text-base md:text-lg leading-relaxed max-w-xl mb-16">
-          Build heuristic strategies, backtest against real market data, and deploy
-          to prediction markets — all from an interface designed for composability
-          and control.
+          Back-test heuristic and ML strategies with real market data and
+          execute live trading— all from an interface designed for you and
+          your agent.
         </p>
 
         <!-- platform tags + pipeline -->
         <div class="animate-fade-up delay-500 flex flex-col sm:flex-row gap-12 sm:gap-20">
           <div>
-            <p class="text-[10px] tracking-[0.25em] uppercase text-neutral-300 mb-3 font-mono">Platforms</p>
+            <p class="text-[10px] tracking-[0.25em] uppercase text-neutral-500 mb-3 font-mono">Platforms</p>
             <div class="flex gap-3">
-              <span class="text-xs font-mono px-3 py-1.5 border border-neutral-200 rounded-full">Kalshi</span>
-              <span class="text-xs font-mono px-3 py-1.5 border border-neutral-200 rounded-full">Polymarket</span>
+              <span class="text-xs font-mono font-bold px-3.5 py-1.5 bg-[#55a179] text-white rounded-[12px]">Kalshi</span>
+              <span class="text-xs font-mono font-bold px-3.5 py-1.5 bg-[#363636] text-white rounded-[12px]">Polymarket</span>
             </div>
           </div>
           <div>
-            <p class="text-[10px] tracking-[0.25em] uppercase text-neutral-300 mb-3 font-mono">Pipeline</p>
+            <p class="text-[10px] tracking-[0.25em] uppercase text-neutral-500 mb-3 font-mono">Pipeline</p>
             <p class="text-xs font-mono text-neutral-500 flex items-center gap-2 flex-wrap">
               <span class="text-[#0a0a0a] font-medium">Source</span>
-              <span class="text-neutral-300">&rarr;</span>
+              <span class="text-[#68a574]">&rarr;</span>
               <span>Filter</span>
-              <span class="text-neutral-300">&rarr;</span>
+              <span class="text-[#68a574]">&rarr;</span>
               <span>Scorer</span>
-              <span class="text-neutral-300">&rarr;</span>
+              <span class="text-[#68a574]">&rarr;</span>
               <span>Selector</span>
-              <span class="text-neutral-300">&rarr;</span>
+              <span class="text-[#68a574]">&rarr;</span>
               <span class="text-[#0a0a0a] font-medium">Executor</span>
             </p>
           </div>
@@ -120,41 +120,66 @@ import '../styles/global.css';
 
 
     <!-- ═══════════════════════════════════════════ -->
-    <!-- LIVE PIPELINE — the terminal hero            -->
+    <!-- PIPELINE + SCORER BEDS — unified section     -->
     <!-- ═══════════════════════════════════════════ -->
     <section id="pipeline" class="relative py-20 md:py-32 px-6 md:px-12 lg:px-20 max-w-[1400px] mx-auto">
 
-      <div class="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-20">
+      <div id="garden" class="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-20">
 
         <!-- left: context -->
         <div class="lg:col-span-4 flex flex-col justify-center">
-          <p class="text-[10px] tracking-[0.3em] uppercase text-neutral-400 mb-4 font-mono">Live Pipeline</p>
+          <p class="text-[10px] tracking-[0.3em] uppercase text-neutral-500 mb-4 font-mono">Live Pipeline</p>
           <h2 class="font-display text-3xl md:text-4xl leading-tight mb-6">
-            Watch your strategy<br />think in real time.
+            Compose your edge.<br />Watch it think.
           </h2>
-          <p class="text-sm text-neutral-500 leading-relaxed mb-8">
-            Every market candidate flows through your filters and scorers.
-            The pipeline shows you exactly why a trade was taken — or rejected.
+          <p class="text-sm text-neutral-500 leading-relaxed mb-10">
+            Mix and weight scorers from different strategy families. Each candidate flows
+            through your filters and scorers — the pipeline shows you exactly why a trade
+            was taken or rejected.
           </p>
-          <div class="space-y-4">
+
+          <div class="space-y-5">
             <div class="flex items-start gap-3">
-              <div class="w-1.5 h-1.5 rounded-full bg-[#0a0a0a] mt-1.5 shrink-0"></div>
+              <div class="w-1.5 h-1.5 rounded-full bg-[#55a179] mt-1.5 shrink-0"></div>
               <p class="text-xs text-neutral-600 leading-relaxed">Trait-based pipeline — swap any stage without touching the rest</p>
             </div>
             <div class="flex items-start gap-3">
-              <div class="w-1.5 h-1.5 rounded-full bg-[#0a0a0a] opacity-50 mt-1.5 shrink-0"></div>
+              <div class="w-1.5 h-1.5 rounded-full bg-[#55a179] opacity-60 mt-1.5 shrink-0"></div>
               <p class="text-xs text-neutral-600 leading-relaxed">Ensemble scorers combine signals with configurable weights</p>
             </div>
             <div class="flex items-start gap-3">
-              <div class="w-1.5 h-1.5 rounded-full bg-[#0a0a0a] opacity-25 mt-1.5 shrink-0"></div>
+              <div class="w-1.5 h-1.5 rounded-full bg-[#55a179] opacity-30 mt-1.5 shrink-0"></div>
               <p class="text-xs text-neutral-600 leading-relaxed">Circuit breakers halt trading when drawdown limits are hit</p>
+            </div>
+          </div>
+
+          <!-- weight distribution — compact -->
+          <div class="mt-10 pt-8 border-t border-neutral-100">
+            <p class="text-[10px] tracking-[0.25em] uppercase text-neutral-400 mb-4 font-mono">Scorer Weights</p>
+            <div class="grid grid-cols-2 gap-x-6 gap-y-2 font-mono text-[11px]">
+              <div class="flex justify-between">
+                <span class="text-neutral-500">momentum</span>
+                <span class="text-neutral-400">0.35</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-neutral-500">volume</span>
+                <span class="text-neutral-400">0.20</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-neutral-500">mean_reversion</span>
+                <span class="text-neutral-400">0.25</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-neutral-500">ensemble</span>
+                <span class="text-neutral-400">0.20</span>
+              </div>
             </div>
           </div>
         </div>
 
         <!-- right: terminal -->
         <div class="lg:col-span-8">
-          <div class="relative bg-[#fafafa] border border-neutral-200 rounded-2xl overflow-hidden">
+          <div class="relative bg-[#fafafa] border border-neutral-200 rounded-[12px] overflow-hidden">
             <!-- terminal chrome -->
             <div class="flex items-center gap-3 px-6 py-4 border-b border-neutral-100">
               <div class="flex gap-1.5">
@@ -162,7 +187,7 @@ import '../styles/global.css';
                 <div class="w-2.5 h-2.5 rounded-full bg-neutral-200"></div>
                 <div class="w-2.5 h-2.5 rounded-full bg-neutral-200"></div>
               </div>
-              <span class="text-[10px] font-mono tracking-wider text-neutral-400 ml-2">openmarketui / paper-trading</span>
+              <span class="text-[10px] font-mono tracking-wider text-neutral-400 ml-2">openmarketui / <span class="text-[#68a574]">paper-trading</span></span>
             </div>
 
             <!-- terminal content -->
@@ -234,21 +259,15 @@ import '../styles/global.css';
           </div>
         </div>
       </div>
-    </section>
 
+      <!-- halftone backdrop for architecture -->
+      <div class="absolute bottom-0 left-0 w-[500px] h-[700px] opacity-[0.06] halftone-lg halftone-fade pointer-events-none" aria-hidden="true"></div>
 
-    <!-- ═══════════════════════════════════════════ -->
-    <!-- ARCHITECTURE                                -->
-    <!-- ═══════════════════════════════════════════ -->
-    <section id="architecture" class="relative py-20 md:py-32 px-6 md:px-12 lg:px-20 max-w-[1400px] mx-auto">
+      <div class="relative z-10 mt-20 md:mt-28">
 
-      <!-- halftone backdrop -->
-      <div class="absolute top-0 left-0 w-[500px] h-[700px] opacity-[0.06] halftone-lg halftone-fade pointer-events-none" aria-hidden="true"></div>
-      <div class="absolute bottom-10 right-0 w-[350px] h-[500px] opacity-[0.04] halftone-md pointer-events-none" style="-webkit-mask-image: linear-gradient(to left, black 10%, transparent 70%); mask-image: linear-gradient(to left, black 10%, transparent 70%);" aria-hidden="true"></div>
-
-      <div class="relative z-10">
-        <div class="max-w-xl mb-12">
-          <p class="text-[10px] tracking-[0.3em] uppercase text-neutral-400 mb-4 font-mono">Architecture</p>
+        <!-- architecture intro -->
+        <div id="architecture" class="max-w-xl mb-12">
+          <p class="text-[10px] tracking-[0.3em] uppercase text-neutral-500 mb-4 font-mono">Architecture</p>
           <h2 class="font-display text-3xl md:text-4xl leading-tight mb-6">
             Designed like a garden.
           </h2>
@@ -260,11 +279,11 @@ import '../styles/global.css';
         </div>
 
         <!-- architecture grid -->
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-px bg-neutral-100 border border-neutral-100 rounded-2xl overflow-hidden">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-px bg-neutral-100 border border-neutral-100 rounded-[12px] overflow-hidden">
 
           <!-- pm-core -->
           <div class="bg-white p-8 md:p-10 hover-lift">
-            <p class="font-mono text-[10px] tracking-[0.25em] uppercase text-neutral-300 mb-4">pm-core</p>
+            <p class="font-mono text-[10px] tracking-[0.25em] uppercase text-neutral-500 mb-4">pm-core</p>
             <h3 class="text-sm font-semibold mb-2">Foundation</h3>
             <p class="text-xs text-neutral-500 leading-relaxed">
               MarketCandidate, TradingContext, and all pipeline traits.
@@ -274,7 +293,7 @@ import '../styles/global.css';
 
           <!-- pm-garden -->
           <div class="bg-white p-8 md:p-10 hover-lift">
-            <p class="font-mono text-[10px] tracking-[0.25em] uppercase text-neutral-300 mb-4">pm-garden</p>
+            <p class="font-mono text-[10px] tracking-[0.25em] uppercase text-neutral-500 mb-4">pm-garden</p>
             <h3 class="text-sm font-semibold mb-2">The Garden</h3>
             <p class="text-xs text-neutral-500 leading-relaxed">
               Scorers and filters organized into beds by strategy family —
@@ -284,7 +303,7 @@ import '../styles/global.css';
 
           <!-- pm-engine -->
           <div class="bg-white p-8 md:p-10 hover-lift">
-            <p class="font-mono text-[10px] tracking-[0.25em] uppercase text-neutral-300 mb-4">pm-engine</p>
+            <p class="font-mono text-[10px] tracking-[0.25em] uppercase text-neutral-500 mb-4">pm-engine</p>
             <h3 class="text-sm font-semibold mb-2">Engine</h3>
             <p class="text-xs text-neutral-500 leading-relaxed">
               Risk management, position sizing, circuit breakers,
@@ -294,7 +313,7 @@ import '../styles/global.css';
 
           <!-- pm-store -->
           <div class="bg-white p-8 md:p-10 hover-lift">
-            <p class="font-mono text-[10px] tracking-[0.25em] uppercase text-neutral-300 mb-4">pm-store</p>
+            <p class="font-mono text-[10px] tracking-[0.25em] uppercase text-neutral-500 mb-4">pm-store</p>
             <h3 class="text-sm font-semibold mb-2">Root Cellar</h3>
             <p class="text-xs text-neutral-500 leading-relaxed">
               SQLite persistence layer. Market data, trade history,
@@ -304,7 +323,7 @@ import '../styles/global.css';
 
           <!-- pm-server -->
           <div class="bg-white p-8 md:p-10 hover-lift">
-            <p class="font-mono text-[10px] tracking-[0.25em] uppercase text-neutral-300 mb-4">pm-server</p>
+            <p class="font-mono text-[10px] tracking-[0.25em] uppercase text-neutral-500 mb-4">pm-server</p>
             <h3 class="text-sm font-semibold mb-2">Greenhouse</h3>
             <p class="text-xs text-neutral-500 leading-relaxed">
               REST + WebSocket server. Real-time state streaming
@@ -314,7 +333,7 @@ import '../styles/global.css';
 
           <!-- pm-kalshi -->
           <div class="bg-white p-8 md:p-10 hover-lift">
-            <p class="font-mono text-[10px] tracking-[0.25em] uppercase text-neutral-300 mb-4">pm-kalshi</p>
+            <p class="font-mono text-[10px] tracking-[0.25em] uppercase text-neutral-500 mb-4">pm-kalshi</p>
             <h3 class="text-sm font-semibold mb-2">Kalshi Engine</h3>
             <p class="text-xs text-neutral-500 leading-relaxed">
               Full Kalshi integration — API client, paper trading,
@@ -323,102 +342,7 @@ import '../styles/global.css';
           </div>
 
         </div>
-      </div>
-    </section>
 
-
-    <!-- ═══════════════════════════════════════════ -->
-    <!-- GARDEN BEDS — scorer families               -->
-    <!-- ═══════════════════════════════════════════ -->
-    <section id="garden" class="relative py-20 md:py-28 px-6 md:px-12 lg:px-20 max-w-[1400px] mx-auto">
-
-      <!-- halftone accent strip -->
-      <div class="absolute top-0 right-20 w-[400px] h-[200px] opacity-[0.05] halftone-md pointer-events-none" style="-webkit-mask-image: radial-gradient(ellipse at top right, black 20%, transparent 60%); mask-image: radial-gradient(ellipse at top right, black 20%, transparent 60%);" aria-hidden="true"></div>
-
-      <div class="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-20">
-
-        <!-- context -->
-        <div class="lg:col-span-5">
-          <p class="text-[10px] tracking-[0.3em] uppercase text-neutral-400 mb-4 font-mono">Scorer Beds</p>
-          <h2 class="font-display text-3xl md:text-4xl leading-tight mb-6">
-            Compose your edge.
-          </h2>
-          <p class="text-sm text-neutral-500 leading-relaxed mb-10">
-            Mix and weight scorers from different strategy families. Each scorer writes
-            to the candidate's score map — the ensemble combines them into a final signal.
-          </p>
-
-          <!-- weight distribution viz -->
-          <div class="border border-neutral-100 rounded-xl p-6 bg-[#fafafa]">
-            <p class="text-[10px] tracking-[0.25em] uppercase text-neutral-300 mb-5 font-mono">Weight Distribution</p>
-            <div class="space-y-3">
-              <div class="flex items-center gap-4">
-                <span class="font-mono text-[11px] text-neutral-500 w-32 shrink-0">momentum</span>
-                <div class="flex-1 h-2 bg-neutral-100 rounded-full overflow-hidden">
-                  <div class="h-full bg-[#0a0a0a] rounded-full" style="width: 35%"></div>
-                </div>
-                <span class="font-mono text-[11px] text-neutral-400 w-10 text-right">0.35</span>
-              </div>
-              <div class="flex items-center gap-4">
-                <span class="font-mono text-[11px] text-neutral-500 w-32 shrink-0">mean_reversion</span>
-                <div class="flex-1 h-2 bg-neutral-100 rounded-full overflow-hidden">
-                  <div class="h-full bg-[#0a0a0a] opacity-70 rounded-full" style="width: 25%"></div>
-                </div>
-                <span class="font-mono text-[11px] text-neutral-400 w-10 text-right">0.25</span>
-              </div>
-              <div class="flex items-center gap-4">
-                <span class="font-mono text-[11px] text-neutral-500 w-32 shrink-0">volume</span>
-                <div class="flex-1 h-2 bg-neutral-100 rounded-full overflow-hidden">
-                  <div class="h-full bg-[#0a0a0a] opacity-50 rounded-full" style="width: 20%"></div>
-                </div>
-                <span class="font-mono text-[11px] text-neutral-400 w-10 text-right">0.20</span>
-              </div>
-              <div class="flex items-center gap-4">
-                <span class="font-mono text-[11px] text-neutral-500 w-32 shrink-0">ensemble</span>
-                <div class="flex-1 h-2 bg-neutral-100 rounded-full overflow-hidden">
-                  <div class="h-full bg-[#0a0a0a] opacity-30 rounded-full" style="width: 20%"></div>
-                </div>
-                <span class="font-mono text-[11px] text-neutral-400 w-10 text-right">0.20</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- scorer list -->
-        <div class="lg:col-span-7 overflow-x-auto">
-          <div class="border border-neutral-100 rounded-2xl overflow-hidden min-w-[520px]">
-            <!-- table header -->
-            <div class="grid grid-cols-[24px_1fr_1fr_auto] gap-4 px-6 py-3 bg-[#fafafa] border-b border-neutral-100 font-mono text-[10px] tracking-[0.2em] uppercase text-neutral-400">
-              <div></div>
-              <div>Name</div>
-              <div>Group</div>
-              <div class="text-right w-14">Weight</div>
-            </div>
-
-            <!-- scorer rows -->
-            {[
-              { name: 'MomentumScorer', group: 'momentum', weight: '0.15' },
-              { name: 'TimeDecayScorer', group: 'momentum', weight: '0.10' },
-              { name: 'MTFMomentum', group: 'momentum', weight: '0.10' },
-              { name: 'BollingerMeanRev', group: 'mean_reversion', weight: '0.15' },
-              { name: 'MeanReversion', group: 'mean_reversion', weight: '0.10' },
-              { name: 'VolumeScorer', group: 'volume', weight: '0.10' },
-              { name: 'VPINScorer', group: 'volume', weight: '0.05' },
-              { name: 'OrderFlowScorer', group: 'volume', weight: '0.05' },
-              { name: 'WeightedScorer', group: 'ensemble', weight: '0.10' },
-              { name: 'BayesianEnsemble', group: 'ensemble', weight: '0.10' },
-            ].map((scorer) => (
-              <div class="grid grid-cols-[24px_1fr_1fr_auto] gap-4 px-6 py-3 border-b border-neutral-50 hover:bg-[#fafafa] transition-colors text-xs">
-                <div class="flex items-center">
-                  <div class="w-2 h-2 rounded-full bg-[#0a0a0a] opacity-60"></div>
-                </div>
-                <div class="font-mono font-medium text-[#0a0a0a]">{scorer.name}</div>
-                <div class="font-mono text-neutral-400">{scorer.group}</div>
-                <div class="font-mono text-right text-neutral-600 w-14">{scorer.weight}</div>
-              </div>
-            ))}
-          </div>
-        </div>
       </div>
     </section>
 
@@ -437,11 +361,11 @@ import '../styles/global.css';
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
 
         <!-- watchtower card — full TUI mockup -->
-        <div class="lg:col-span-2 border border-neutral-200 rounded-2xl relative overflow-hidden hover-lift">
+        <div class="lg:col-span-2 border border-neutral-200 rounded-[12px] relative overflow-hidden hover-lift">
           <div class="absolute top-0 right-0 w-80 h-80 opacity-[0.06] halftone-sm pointer-events-none" aria-hidden="true"></div>
 
           <div class="p-8 md:p-10 pb-6">
-            <p class="font-mono text-[10px] tracking-[0.25em] uppercase text-neutral-300 mb-6">Interface</p>
+            <p class="font-mono text-[10px] tracking-[0.25em] uppercase text-neutral-500 mb-6">Interface</p>
             <h3 class="font-display text-2xl md:text-3xl leading-tight mb-4">Watchtower</h3>
             <p class="text-sm text-neutral-500 leading-relaxed max-w-xl">
               Terminal UI built with OpenTUI. Monitor positions, engine state,
@@ -451,7 +375,7 @@ import '../styles/global.css';
           </div>
 
           <!-- TUI mockup — monochrome -->
-          <div class="mx-4 md:mx-6 mb-4 md:mb-6 rounded-xl overflow-hidden border border-neutral-200 bg-[#fafafa] font-mono text-[11px] leading-[1.7]">
+          <div class="mx-4 md:mx-6 mb-4 md:mb-6 rounded-[12px] overflow-hidden border border-neutral-200 bg-[#fafafa] font-mono text-[11px] leading-[1.7]">
 
             <!-- TUI header -->
             <div class="flex justify-between px-4 py-1.5 bg-neutral-100">
@@ -595,7 +519,7 @@ import '../styles/global.css';
 
       <!-- halftone background panel -->
       <div class="absolute inset-0 mx-6 md:mx-12 lg:mx-20 bg-[#0a0a0a] rounded-3xl overflow-hidden">
-        <div class="absolute inset-0 opacity-[0.12] halftone-lg animate-dots-drift" aria-hidden="true" style="background-image: radial-gradient(circle, #fff 1.2px, transparent 1.2px); background-size: 8px 8px;"></div>
+        <div class="absolute inset-0 opacity-[0.12] halftone-lg animate-dots-drift" aria-hidden="true" style="background-image: radial-gradient(circle, #55a179 1.2px, transparent 1.2px); background-size: 8px 8px;"></div>
       </div>
 
       <div class="relative z-10 py-16 md:py-24 px-8 md:px-16">
@@ -658,10 +582,10 @@ import '../styles/global.css';
       </div>
 
       <div class="mt-12 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <p class="text-[10px] tracking-[0.25em] uppercase text-neutral-300 font-mono">
+        <p class="text-[10px] tracking-[0.25em] uppercase text-neutral-500 font-mono">
           Signet AI
         </p>
-        <p class="text-[10px] tracking-[0.15em] text-neutral-300 font-mono">
+        <p class="text-[10px] tracking-[0.15em] text-neutral-500 font-mono">
           Open source &middot; MIT License
         </p>
       </div>

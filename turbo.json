@@ -1,0 +1,24 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "tui",
+  "tasks": {
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "build": {
+      "outputs": ["dist/**", "out/**", ".astro/**"],
+      "cache": true
+    },
+    "typecheck": {
+      "dependsOn": [],
+      "cache": true,
+      "outputs": []
+    },
+    "preview": {
+      "dependsOn": ["build"],
+      "cache": false,
+      "persistent": true
+    }
+  }
+}

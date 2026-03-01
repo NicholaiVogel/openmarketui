@@ -1,0 +1,55 @@
+[package]
+name = "pm-kalshi"
+description = "Kalshi prediction market trading engine"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "kalshi"
+path = "src/main.rs"
+
+[dependencies]
+pm-core = { path = "../pm-core" }
+pm-store = { path = "../pm-store" }
+pm-garden = { path = "../pm-garden" }
+pm-engine = { path = "../pm-engine" }
+pm-server = { path = "../pm-server" }
+
+# async
+tokio.workspace = true
+async-trait.workspace = true
+
+# serialization
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+
+# time
+chrono.workspace = true
+
+# numerics
+rust_decimal.workspace = true
+rust_decimal_macros.workspace = true
+
+# error handling
+anyhow.workspace = true
+thiserror.workspace = true
+
+# logging
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# misc
+uuid.workspace = true
+
+# kalshi-specific
+reqwest = { version = "0.12", features = ["json"] }
+governor = "0.8"
+csv = "1.3"
+clap = { version = "4.5", features = ["derive"] }
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+futures = "0.3"
+
+[dev-dependencies]
+tempfile = "3"

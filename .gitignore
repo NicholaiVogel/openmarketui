@@ -1,0 +1,55 @@
+# rust
+target/
+compost/kalshi/target/
+**/*.rs.bk
+
+# js workspace
+node_modules/
+.turbo/
+*.tsbuildinfo
+
+# js build outputs
+watchtower/dist/
+web/dist/
+web/.astro/
+
+# python
+polymarket/.venv/
+polymarket/__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# data
+data/**/*.csv
+data/**/*.db
+!data/**/.gitkeep
+
+# databases
+*.db
+*.db-shm
+*.db-wal
+
+# config (use .example versions)
+kalshi/config.toml
+polymarket/config.toml
+
+# secrets
+.env
+*.env
+credentials.json
+
+# ide
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# misc
+.DS_Store
+kalshi.log
+watchtower.md
+tmp/
+references/
