@@ -113,6 +113,8 @@ pub struct PersistenceConfig {
 pub struct WebConfig {
     pub enabled: bool,
     pub bind_addr: String,
+    /// Path to Becker's prediction-market-analysis data/ directory for parquet backtesting
+    pub parquet_data_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -175,6 +177,7 @@ impl Default for WebConfig {
         Self {
             enabled: true,
             bind_addr: "127.0.0.1:3030".to_string(),
+            parquet_data_dir: None,
         }
     }
 }

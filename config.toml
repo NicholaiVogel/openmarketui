@@ -24,6 +24,7 @@ db_path = "/home/nicholai/prediction-markets/data/kalshi-paper.db"
 [web]
 enabled = true
 bind_addr = "127.0.0.1:3030"
+parquet_data_dir = "/mnt/work/prediction-market-analysis/data"
 
 [circuit_breaker]
 max_drawdown_pct = 0.15

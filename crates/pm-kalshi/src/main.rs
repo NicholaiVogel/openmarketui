@@ -350,6 +350,8 @@ async fn run_paper(config_path: PathBuf) -> Result<()> {
         let data_fetcher = Arc::new(DataFetcher::new(data_dir.clone(), historical_store.clone()));
         let fetch_state = Arc::new(tokio::sync::RwLock::new(FetchState::default()));
 
+        let parquet_data_dir = app_config.web.parquet_data_dir.as_ref().map(PathBuf::from);
+
         let web_state = Arc::new(web::AppState {
             engine: engine.clone(),
             store: store.clone(),
@@ -368,6 +370,7 @@ async fn run_paper(config_path: PathBuf) -> Result<()> {
             session: Arc::new(tokio::sync::RwLock::new(web::SessionState::default())),
             fetch_state,
             data_fetcher,
+            parquet_data_dir,
         });
 
         let router = web::build_router(web_state.clone());

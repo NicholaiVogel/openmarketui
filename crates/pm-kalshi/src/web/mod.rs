@@ -195,6 +195,9 @@ pub struct AppState {
     pub session: Arc<RwLock<SessionState>>,
     pub fetch_state: Arc<RwLock<FetchState>>,
     pub data_fetcher: Arc<DataFetcher>,
+    /// Optional path to Becker's prediction-market-analysis data/ directory
+    /// for parquet-based backtesting
+    pub parquet_data_dir: Option<PathBuf>,
 }
 
 pub fn build_router(state: Arc<AppState>) -> Router {

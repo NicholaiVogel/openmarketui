@@ -67,7 +67,7 @@ mod flexible_datetime {
 pub struct HistoricalData {
     pub markets: HashMap<String, MarketData>,
     pub trades: Vec<TradeData>,
-    trade_index: HashMap<String, Vec<usize>>,
+    pub(crate) trade_index: HashMap<String, Vec<usize>>,
 }
 
 impl HistoricalData {

@@ -278,6 +278,9 @@ pub struct BacktestRequest {
     pub take_profit: Option<f64>,
     pub stop_loss: Option<f64>,
     pub max_hold_hours: Option<i64>,
+    /// "parquet" to use Becker dataset, "sqlite" (default) for local data
+    #[serde(default)]
+    pub data_source: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -376,9 +379,41 @@ pub async fn post_backtest_run(
     let max_hold_hours = req.max_hold_hours.unwrap_or(48);
 
     let historical_store = state.historical_store.clone();
+    let parquet_data_dir = state.parquet_data_dir.clone();
+    let use_parquet = req.data_source.as_deref() == Some("parquet")
+        || parquet_data_dir.is_some();
 
     tokio::spawn(async move {
-        let data = {
+        let data = if use_parquet {
+            if let Some(ref parquet_dir) = parquet_data_dir {
+                info!(dir = %parquet_dir.display(), "loading backtest data from parquet");
+                match crate::data::load_parquet(parquet_dir, Some((start_time, end_time))) {
+                    Ok(d) => Arc::new(d),
+                    Err(e) => {
+                        let mut guard = backtest_state.lock().await;
+                        guard.status = BacktestRunStatus::Failed;
+                        guard.error = Some(format!("failed to load parquet data: {}", e));
+                        error!(error = %e, "backtest parquet load failed");
+
+                        let mut session = session_state.write().await;
+                        if session.mode == SessionMode::Backtest {
+                            *session = super::SessionState::default();
+                        }
+                        return;
+                    }
+                }
+            } else {
+                let mut guard = backtest_state.lock().await;
+                guard.status = BacktestRunStatus::Failed;
+                guard.error = Some("parquet data source requested but no parquet_data_dir configured".into());
+
+                let mut session = session_state.write().await;
+                if session.mode == SessionMode::Backtest {
+                    *session = super::SessionState::default();
+                }
+                return;
+            }
+        } else {
             info!("loading backtest data from historical sqlite");
             match HistoricalData::load_sqlite(&historical_store, start_time, end_time).await {
                 Ok(d) => Arc::new(d),
@@ -626,6 +661,7 @@ pub async fn post_session_start(
                 take_profit: Some(config.take_profit_pct),
                 stop_loss: Some(config.stop_loss_pct),
                 max_hold_hours: Some(config.max_hold_hours),
+                data_source: None,
             };
 
             let state_for_backtest = state.clone();
