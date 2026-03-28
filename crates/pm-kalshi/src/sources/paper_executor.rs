@@ -17,6 +17,8 @@ use tokio::sync::RwLock;
 struct MarketSnapshot {
     yes_mid: Decimal,
     volume_24h: u64,
+    yes_spread_bps: Option<f64>,
+    no_spread_bps: Option<f64>,
 }
 
 pub struct PaperExecutor {
@@ -59,6 +61,8 @@ impl PaperExecutor {
                 MarketSnapshot {
                     yes_mid: c.current_yes_price,
                     volume_24h: c.volume_24h,
+                    yes_spread_bps: c.scores.get("tradeability_yes_spread_bps").copied(),
+                    no_spread_bps: c.scores.get("tradeability_no_spread_bps").copied(),
                 },
             );
         }
@@ -87,6 +91,8 @@ impl PaperExecutor {
             requested_qty,
             None,
             None,
+            false,
+            0.0,
             false,
             timestamp,
             fallback_yes_price,
@@ -145,6 +151,90 @@ impl PaperExecutor {
         requested_qty.min(liq_cap)
     }
 
+    fn entry_limit_tolerance_bps(&self, urgency_score: f64) -> f64 {
+        if urgency_score.abs() >= self.execution_config.urgency_score_threshold {
+            self.execution_config.urgent_max_limit_drift_bps
+        } else {
+            self.execution_config.max_limit_drift_bps
+        }
+    }
+
+    fn entry_sweep_cap(&self, volume_24h: u64, urgency_score: f64) -> u64 {
+        let pct = if urgency_score.abs() >= self.execution_config.urgency_score_threshold {
+            self.execution_config.urgent_entry_sweep_pct_24h
+        } else {
+            self.execution_config.max_entry_sweep_pct_24h
+        };
+
+        ((volume_24h as f64) * pct)
+            .floor()
+            .max(self.execution_config.min_fill_qty as f64) as u64
+    }
+
+    fn snapshot_spread_bps(snapshot: &MarketSnapshot, side: Side) -> Option<f64> {
+        match side {
+            Side::Yes => snapshot.yes_spread_bps.or(snapshot.no_spread_bps),
+            Side::No => snapshot.no_spread_bps.or(snapshot.yes_spread_bps),
+        }
+    }
+
+    fn enforce_entry_tradeability(
+        &self,
+        ticker: &str,
+        side: Side,
+        requested_qty: u64,
+        urgency_score: f64,
+        snapshot: &MarketSnapshot,
+    ) -> Option<u64> {
+        if snapshot.volume_24h < self.execution_config.min_trade_volume_24h {
+            tracing::debug!(
+                ticker = %ticker,
+                volume_24h = snapshot.volume_24h,
+                min_volume_24h = self.execution_config.min_trade_volume_24h,
+                "entry rejected: insufficient market depth"
+            );
+            return None;
+        }
+
+        if let Some(spread_bps) = Self::snapshot_spread_bps(snapshot, side) {
+            if spread_bps > self.execution_config.max_entry_spread_bps {
+                tracing::debug!(
+                    ticker = %ticker,
+                    spread_bps = spread_bps,
+                    max_spread_bps = self.execution_config.max_entry_spread_bps,
+                    "entry rejected: spread too wide"
+                );
+                return None;
+            }
+        }
+
+        let cap = self.entry_sweep_cap(snapshot.volume_24h, urgency_score);
+        if requested_qty <= cap {
+            return Some(requested_qty);
+        }
+
+        if urgency_score.abs() >= self.execution_config.urgency_score_threshold {
+            tracing::debug!(
+                ticker = %ticker,
+                requested_qty,
+                capped_qty = cap,
+                urgency_score,
+                "urgent entry downsized to avoid sweeping the book"
+            );
+            Some(cap)
+        } else {
+            tracing::debug!(
+                ticker = %ticker,
+                requested_qty,
+                cap_qty = cap,
+                urgency_score,
+                threshold = self.execution_config.urgency_score_threshold,
+                "entry rejected: sweep too aggressive for current urgency"
+            );
+            None
+        }
+    }
+
     fn latency_ms(&self, requested_qty: u64, filled_qty: u64) -> u64 {
         let min_latency = self.execution_config.min_latency_ms;
         let max_latency = self.execution_config.max_latency_ms.max(min_latency);
@@ -167,6 +257,8 @@ impl PaperExecutor {
         limit_price: Option<Decimal>,
         available_cash: Option<Decimal>,
         is_buy: bool,
+        urgency_score: f64,
+        enforce_entry_tradeability: bool,
         timestamp: DateTime<Utc>,
         fallback_yes_price: Option<Decimal>,
     ) -> Option<Fill> {
@@ -174,23 +266,43 @@ impl PaperExecutor {
             return None;
         }
 
-        let (yes_mid, volume_24h) = {
+        let snapshot = {
             let state = self.market_state.read().await;
             if let Some(snap) = state.get(ticker) {
-                (snap.yes_mid, snap.volume_24h)
+                snap.clone()
             } else {
-                (fallback_yes_price?, 0)
+                MarketSnapshot {
+                    yes_mid: fallback_yes_price?,
+                    volume_24h: 0,
+                    yes_spread_bps: None,
+                    no_spread_bps: None,
+                }
             }
         };
 
-        let mid_contract = Self::contract_mid_from_yes(yes_mid, side).to_f64()?;
+        let execution_request_qty = if is_buy && enforce_entry_tradeability {
+            self.enforce_entry_tradeability(ticker, side, requested_qty, urgency_score, &snapshot)?
+        } else {
+            requested_qty
+        };
+
+        let mid_contract = Self::contract_mid_from_yes(snapshot.yes_mid, side).to_f64()?;
         let spread_price = self.spread_adjusted_price(mid_contract, is_buy);
-        let slipped_price =
-            self.slippage_adjusted_price(spread_price, requested_qty, volume_24h, is_buy);
+        let slipped_price = self.slippage_adjusted_price(
+            spread_price,
+            execution_request_qty,
+            snapshot.volume_24h,
+            is_buy,
+        );
         let mut fill_price = Decimal::from_f64(slipped_price)?;
 
         if let Some(limit) = limit_price {
-            let tolerance = Decimal::new(5, 2); // 5%
+            let tolerance_bps = if is_buy && enforce_entry_tradeability {
+                self.entry_limit_tolerance_bps(urgency_score)
+            } else {
+                500.0 // keep wider tolerance for non-entry execution paths
+            };
+            let tolerance = Decimal::from_f64((tolerance_bps / 10_000.0).max(0.0))?;
             if is_buy && fill_price > limit * (Decimal::ONE + tolerance) {
                 return None;
             }
@@ -199,7 +311,7 @@ impl PaperExecutor {
             }
         }
 
-        let mut quantity = self.partial_fill_qty(requested_qty, volume_24h);
+        let mut quantity = self.partial_fill_qty(execution_request_qty, snapshot.volume_24h);
         if quantity == 0 {
             return None;
         }
@@ -225,7 +337,7 @@ impl PaperExecutor {
         let fee = Decimal::from_f64(self.fee_config.calculate(quantity, price_f64));
 
         // model exchange/queue latency before fill appears
-        let latency_ms = self.latency_ms(requested_qty, quantity);
+        let latency_ms = self.latency_ms(execution_request_qty, quantity);
         if latency_ms > 0 {
             tokio::time::sleep(Duration::from_millis(latency_ms)).await;
         }
@@ -256,6 +368,8 @@ impl OrderExecutor for PaperExecutor {
                 signal.quantity.min(self.max_position_size),
                 signal.limit_price,
                 Some(context.portfolio.cash),
+                true,
+                signal.urgency_score,
                 true,
                 context.timestamp,
                 None,

@@ -83,6 +83,20 @@ pub struct PaperExecutionConfig {
     pub min_latency_ms: u64,
     #[serde(default = "default_max_latency_ms")]
     pub max_latency_ms: u64,
+    #[serde(default = "default_min_trade_volume_24h")]
+    pub min_trade_volume_24h: u64,
+    #[serde(default = "default_max_entry_spread_bps")]
+    pub max_entry_spread_bps: f64,
+    #[serde(default = "default_max_entry_sweep_pct_24h")]
+    pub max_entry_sweep_pct_24h: f64,
+    #[serde(default = "default_urgent_entry_sweep_pct_24h")]
+    pub urgent_entry_sweep_pct_24h: f64,
+    #[serde(default = "default_urgency_score_threshold")]
+    pub urgency_score_threshold: f64,
+    #[serde(default = "default_max_limit_drift_bps")]
+    pub max_limit_drift_bps: f64,
+    #[serde(default = "default_urgent_max_limit_drift_bps")]
+    pub urgent_max_limit_drift_bps: f64,
 }
 
 fn default_spread_bps() -> f64 {
@@ -106,6 +120,27 @@ fn default_min_latency_ms() -> u64 {
 fn default_max_latency_ms() -> u64 {
     700
 }
+fn default_min_trade_volume_24h() -> u64 {
+    10_000
+}
+fn default_max_entry_spread_bps() -> f64 {
+    180.0
+}
+fn default_max_entry_sweep_pct_24h() -> f64 {
+    0.0025
+}
+fn default_urgent_entry_sweep_pct_24h() -> f64 {
+    0.0075
+}
+fn default_urgency_score_threshold() -> f64 {
+    0.80
+}
+fn default_max_limit_drift_bps() -> f64 {
+    20.0
+}
+fn default_urgent_max_limit_drift_bps() -> f64 {
+    80.0
+}
 
 impl Default for PaperExecutionConfig {
     fn default() -> Self {
@@ -117,6 +152,13 @@ impl Default for PaperExecutionConfig {
             min_fill_qty: default_min_fill_qty(),
             min_latency_ms: default_min_latency_ms(),
             max_latency_ms: default_max_latency_ms(),
+            min_trade_volume_24h: default_min_trade_volume_24h(),
+            max_entry_spread_bps: default_max_entry_spread_bps(),
+            max_entry_sweep_pct_24h: default_max_entry_sweep_pct_24h(),
+            urgent_entry_sweep_pct_24h: default_urgent_entry_sweep_pct_24h(),
+            urgency_score_threshold: default_urgency_score_threshold(),
+            max_limit_drift_bps: default_max_limit_drift_bps(),
+            urgent_max_limit_drift_bps: default_urgent_max_limit_drift_bps(),
         }
     }
 }

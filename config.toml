@@ -51,3 +51,12 @@ max_fill_pct_24h = 0.01
 min_fill_qty = 1
 min_latency_ms = 120
 max_latency_ms = 700
+
+# strict tradeability gates for entries
+min_trade_volume_24h = 10000
+max_entry_spread_bps = 180.0
+max_entry_sweep_pct_24h = 0.0025
+urgent_entry_sweep_pct_24h = 0.0075
+urgency_score_threshold = 0.80
+max_limit_drift_bps = 20.0
+urgent_max_limit_drift_bps = 80.0

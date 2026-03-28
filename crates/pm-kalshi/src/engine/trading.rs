@@ -11,7 +11,7 @@ use pm_core::{
 };
 use pm_engine::{CbCheckContext, CbStatus, CircuitBreakerState};
 use pm_garden::{
-    AlreadyPositionedFilter, BollingerMeanReversionScorer, CategoryWeightedScorer,
+    AlreadyPositionedFilter, BollingerMeanReversionScorer, CategoryWeightedScorer, LiquidityFilter,
     MeanReversionScorer, MomentumScorer, MultiTimeframeMomentumScorer, OrderFlowScorer,
     TimeDecayScorer, TimeToCloseFilter, VolumeScorer,
 };
@@ -123,6 +123,9 @@ impl PaperTradingEngine {
             Box::new(TimeToCloseFilter::new(
                 config.trading.min_time_to_close_hours,
                 Some(config.trading.max_time_to_close_hours),
+            )),
+            Box::new(LiquidityFilter::new(
+                config.paper_execution.min_trade_volume_24h,
             )),
             Box::new(AlreadyPositionedFilter::new(max_pos_size.max(100))),
         ];

@@ -141,6 +141,7 @@ impl BacktestExecutor {
                     side,
                     quantity: self.sizing_config.max_position_size,
                     limit_price: Some(price),
+                    urgency_score: c.final_score.abs(),
                     reason: format!("backtest: score={:.3}", c.final_score),
                 }
             })
