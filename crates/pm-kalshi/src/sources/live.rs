@@ -16,6 +16,15 @@ impl LiveKalshiSource {
     pub fn new(client: Arc<KalshiClient>) -> Self {
         Self { client }
     }
+
+    fn quote_spread_bps(bid_cents: i64, ask_cents: i64) -> Option<f64> {
+        if bid_cents > 0 && ask_cents > 0 && ask_cents >= bid_cents {
+            let spread = (ask_cents - bid_cents) as f64 / 100.0;
+            Some(spread * 10_000.0)
+        } else {
+            None
+        }
+    }
 }
 
 #[async_trait]
@@ -50,6 +59,17 @@ impl Source for LiveKalshiSource {
             let volume_24h = market.volume_24h.max(0) as u64;
             let total_volume = market.volume.max(0) as u64;
 
+            let yes_spread_bps = Self::quote_spread_bps(market.yes_bid, market.yes_ask);
+            let no_spread_bps = Self::quote_spread_bps(market.no_bid, market.no_ask);
+
+            let mut scores = HashMap::new();
+            if let Some(spread_bps) = yes_spread_bps {
+                scores.insert("tradeability_yes_spread_bps".to_string(), spread_bps);
+            }
+            if let Some(spread_bps) = no_spread_bps {
+                scores.insert("tradeability_no_spread_bps".to_string(), spread_bps);
+            }
+
             let price_history = Vec::new();
             let buy_vol = 0u64;
             let sell_vol = 0u64;
@@ -70,7 +90,7 @@ impl Source for LiveKalshiSource {
                 close_time: market.close_time,
                 result: None,
                 price_history,
-                scores: HashMap::new(),
+                scores,
                 final_score: 0.0,
             });
         }

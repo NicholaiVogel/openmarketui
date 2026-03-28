@@ -141,6 +141,7 @@ impl BacktestExecutor {
                     side,
                     quantity: self.sizing_config.max_position_size,
                     limit_price: Some(price),
+                    urgency_score: c.final_score.abs(),
                     reason: format!("backtest: score={:.3}", c.final_score),
                 }
             })
@@ -394,9 +395,13 @@ impl Backtester {
                 .generate_exit_signals(&context, &candidate_scores);
             for exit in exit_signals {
                 if let Some(position) = context.portfolio.positions.get(&exit.ticker).cloned() {
+                    let exit_contract_price = match position.side {
+                        Side::Yes => exit.current_price,
+                        Side::No => Decimal::ONE - exit.current_price,
+                    };
                     let pnl = context
                         .portfolio
-                        .close_position(&exit.ticker, exit.current_price);
+                        .close_position(&exit.ticker, exit_contract_price);
 
                     info!(
                         ticker = %exit.ticker,
@@ -503,11 +508,7 @@ impl Backtester {
 
         if let Some(ref callback) = self.step_callback {
             let market_prices = self.get_current_prices(self.config.end_time);
-            callback(self.snapshot_for_context(
-                &context,
-                &market_prices,
-                final_fills_this_step,
-            ));
+            callback(self.snapshot_for_context(&context, &market_prices, final_fills_this_step));
         }
 
         info!(
@@ -542,7 +543,11 @@ impl Backtester {
             .portfolio
             .positions
             .values()
-            .map(|p| (p.avg_entry_price * Decimal::from(p.quantity)).to_f64().unwrap_or(0.0))
+            .map(|p| {
+                (p.avg_entry_price * Decimal::from(p.quantity))
+                    .to_f64()
+                    .unwrap_or(0.0)
+            })
             .sum::<f64>();
 
         let positions_value = context
