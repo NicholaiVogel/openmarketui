@@ -21,6 +21,8 @@ pub struct AppConfig {
     pub circuit_breaker: CircuitBreakerConfig,
     #[serde(default)]
     pub fees: FeeConfig,
+    #[serde(default)]
+    pub paper_execution: PaperExecutionConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -61,6 +63,60 @@ impl Default for FeeConfig {
             max_per_contract: default_max_per_contract(),
             assume_taker: default_assume_taker(),
             min_edge_after_fees: default_min_edge_after_fees(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PaperExecutionConfig {
+    #[serde(default = "default_spread_bps")]
+    pub spread_bps: f64,
+    #[serde(default = "default_slippage_bps")]
+    pub slippage_bps: f64,
+    #[serde(default = "default_impact_bps_per_1pct_24h")]
+    pub impact_bps_per_1pct_24h: f64,
+    #[serde(default = "default_max_fill_pct_24h")]
+    pub max_fill_pct_24h: f64,
+    #[serde(default = "default_min_fill_qty")]
+    pub min_fill_qty: u64,
+    #[serde(default = "default_min_latency_ms")]
+    pub min_latency_ms: u64,
+    #[serde(default = "default_max_latency_ms")]
+    pub max_latency_ms: u64,
+}
+
+fn default_spread_bps() -> f64 {
+    120.0
+}
+fn default_slippage_bps() -> f64 {
+    12.0
+}
+fn default_impact_bps_per_1pct_24h() -> f64 {
+    8.0
+}
+fn default_max_fill_pct_24h() -> f64 {
+    0.01
+}
+fn default_min_fill_qty() -> u64 {
+    1
+}
+fn default_min_latency_ms() -> u64 {
+    120
+}
+fn default_max_latency_ms() -> u64 {
+    700
+}
+
+impl Default for PaperExecutionConfig {
+    fn default() -> Self {
+        Self {
+            spread_bps: default_spread_bps(),
+            slippage_bps: default_slippage_bps(),
+            impact_bps_per_1pct_24h: default_impact_bps_per_1pct_24h(),
+            max_fill_pct_24h: default_max_fill_pct_24h(),
+            min_fill_qty: default_min_fill_qty(),
+            min_latency_ms: default_min_latency_ms(),
+            max_latency_ms: default_max_latency_ms(),
         }
     }
 }

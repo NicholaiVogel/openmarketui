@@ -283,12 +283,9 @@ impl PaperTradingEngine {
             .map(|c| (c.ticker.clone(), c.final_score))
             .collect();
 
-        let current_prices: HashMap<String, Decimal> = result
-            .retrieved_candidates
-            .iter()
-            .map(|c| (c.ticker.clone(), c.current_yes_price))
-            .collect();
-        self.executor.update_prices(current_prices).await;
+        self.executor
+            .update_market_state(&result.retrieved_candidates)
+            .await;
 
         let exit_signals = self
             .executor
@@ -313,25 +310,39 @@ impl PaperTradingEngine {
 
         for exit in &exit_signals {
             if let Some(position) = ctx.portfolio.positions.get(&exit.ticker).cloned() {
-                let pnl = ctx
-                    .portfolio
-                    .close_position(&exit.ticker, exit.current_price);
+                let exit_exec_start = Instant::now();
+                let maybe_fill = self
+                    .executor
+                    .execute_exit_fill(
+                        &exit.ticker,
+                        position.side,
+                        position.quantity,
+                        now,
+                        Some(exit.current_price),
+                    )
+                    .await;
+
+                let Some(exit_fill) = maybe_fill else {
+                    debug!(ticker = %exit.ticker, "exit signal not filled");
+                    continue;
+                };
+
+                let pnl = ctx.portfolio.close_position_partial(
+                    &exit.ticker,
+                    exit_fill.quantity,
+                    exit_fill.price,
+                    exit_fill.fee,
+                );
 
                 info!(
                     ticker = %exit.ticker,
                     reason = ?exit.reason,
+                    qty = exit_fill.quantity,
+                    fill_price = %exit_fill.price,
+                    fee = ?exit_fill.fee,
                     pnl = ?pnl,
                     "paper exit"
                 );
-
-                let exit_fill = pm_core::Fill {
-                    ticker: exit.ticker.clone(),
-                    side: position.side,
-                    quantity: position.quantity,
-                    price: exit.current_price,
-                    timestamp: now,
-                    fee: None,
-                };
 
                 let reason_str = format!("{:?}", exit.reason);
                 let _ = self
@@ -342,9 +353,9 @@ impl PaperTradingEngine {
                 ctx.trading_history.push(Trade {
                     ticker: exit.ticker.clone(),
                     side: position.side,
-                    quantity: position.quantity,
-                    price: exit.current_price,
-                    timestamp: now,
+                    quantity: exit_fill.quantity,
+                    price: exit_fill.price,
+                    timestamp: exit_fill.timestamp,
                     trade_type: TradeType::Close,
                 });
 
@@ -356,7 +367,7 @@ impl PaperTradingEngine {
                     score: candidate_scores.get(&exit.ticker).copied().unwrap_or(0.0),
                     scorer_breakdown: HashMap::new(),
                     reason: Some(reason_str),
-                    latency_ms: tick_start.elapsed().as_millis() as u64,
+                    latency_ms: exit_exec_start.elapsed().as_millis() as u64,
                     timestamp: now,
                 });
 
@@ -480,6 +491,7 @@ impl PaperTradingEngine {
             }
 
             let context_for_exec = (*ctx).clone();
+            let entry_exec_start = Instant::now();
             if let Some(fill) = self
                 .executor
                 .execute_signal(&signal, &context_for_exec)
@@ -521,7 +533,7 @@ impl PaperTradingEngine {
                     score: candidate_score,
                     scorer_breakdown: HashMap::new(),
                     reason: Some(signal.reason.clone()),
-                    latency_ms: tick_start.elapsed().as_millis() as u64,
+                    latency_ms: entry_exec_start.elapsed().as_millis() as u64,
                     timestamp: now,
                 });
 
