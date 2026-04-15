@@ -14,6 +14,8 @@ pub struct Signal {
     pub side: Side,
     pub quantity: u64,
     pub limit_price: Option<Decimal>,
+    #[serde(default)]
+    pub urgency_score: f64,
     pub reason: String,
 }
 

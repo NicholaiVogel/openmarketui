@@ -320,6 +320,7 @@ async fn run_paper(config_path: PathBuf) -> Result<()> {
         sizing_config,
         exit_config,
         fee_config,
+        app_config.paper_execution.clone(),
         store.clone(),
     ));
 

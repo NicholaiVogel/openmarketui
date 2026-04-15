@@ -365,12 +365,20 @@
     "2026-01-25",
     "2026-01-26",
     "2026-01-27",
-    "2026-02-28"
+    "2026-02-28",
+    "2026-04-08",
+    "2026-04-09",
+    "2026-04-10",
+    "2026-04-11",
+    "2026-04-12",
+    "2026-04-13",
+    "2026-04-14",
+    "2026-04-15"
   ],
   "current_day": null,
   "current_day_cursor": null,
   "current_day_count": 0,
-  "total_trades": 3660000,
+  "total_trades": 3830000,
   "markets_cursor": null,
   "markets_count": 4862181,
   "markets_done": true

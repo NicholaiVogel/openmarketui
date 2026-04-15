@@ -82,7 +82,7 @@ export function CommandMenu() {
           : menuScreen === "date_range"
             ? " date range "
             : menuScreen === "data_manager"
-              ? " historical data "
+              ? " simulation data "
               : " command menu ";
 
   return (
@@ -103,7 +103,7 @@ export function CommandMenu() {
           borderColor: colors.border,
           backgroundColor: colors.bg,
           padding: 1,
-          width: 60,
+          width: 72,
           flexDirection: "column",
         }}
         title={title}

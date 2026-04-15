@@ -179,7 +179,7 @@ export const useModeStore = create<ModeStore>((set, get) => ({
     } else if (menuScreen === "date_range") {
       maxIndex = get().getDateRangePresetCount();
     } else if (menuScreen === "data_manager") {
-      maxIndex = 4; // 5 date presets
+      maxIndex = 5; // 6 data download presets
     }
 
     const newIndex = Math.max(0, Math.min(maxIndex, menuIndex + delta));

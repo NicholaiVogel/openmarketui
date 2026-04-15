@@ -163,6 +163,7 @@ pub fn candidate_to_signal(
         side,
         quantity,
         limit_price: Some(price),
+        urgency_score: candidate.final_score.abs(),
         reason: format!(
             "score={:.3}, side={:?}, price={:.2}, fee_drag={:.3}",
             candidate.final_score, side, price_f64, total_fee_drag
@@ -289,6 +290,7 @@ pub fn simple_signal_generator(
                 side,
                 quantity: position_size,
                 limit_price: Some(price),
+                urgency_score: c.final_score.abs(),
                 reason: format!("simple: score={:.3}", c.final_score),
             }
         })

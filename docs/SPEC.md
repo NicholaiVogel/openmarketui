@@ -1,0 +1,1 @@
+/mnt/work/obsidian-vault/permanent/OpenMarketUI-SPEC.md
