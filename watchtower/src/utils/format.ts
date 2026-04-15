@@ -8,7 +8,9 @@ export function formatDuration(secs: number): string {
 }
 
 export function renderProgressBar(pct: number, width: number): string {
-  const filled = Math.round((pct / 100) * width);
-  const empty = width - filled;
+  const safeWidth = Math.max(0, Math.floor(Number.isFinite(width) ? width : 0));
+  const safePct = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
+  const filled = Math.min(safeWidth, Math.round((safePct / 100) * safeWidth));
+  const empty = safeWidth - filled;
   return "[" + "\u2588".repeat(filled) + "\u2591".repeat(empty) + "]";
 }

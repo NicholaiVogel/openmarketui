@@ -8,8 +8,8 @@ use pm_store::SqliteStore;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use tracing::{info, warn};
 
 const BASE_URL: &str = "https://api.elections.kalshi.com/trade-api/v2";
@@ -285,6 +285,11 @@ impl DataFetcher {
         } else {
             Vec::new()
         };
+        let completed_in_range = if fetch_trades {
+            all_days.iter().filter(|d| completed.contains(*d)).count()
+        } else {
+            0
+        };
 
         {
             let mut guard = state.write().await;
@@ -297,7 +302,7 @@ impl DataFetcher {
             guard.days_total.store(all_days.len(), Ordering::Relaxed);
             guard
                 .days_complete
-                .store(completed.len(), Ordering::Relaxed);
+                .store(completed_in_range, Ordering::Relaxed);
             guard
                 .trades_fetched
                 .store(file_state.total_trades, Ordering::Relaxed);
@@ -316,7 +321,7 @@ impl DataFetcher {
             fetch_markets = fetch_markets,
             fetch_trades = fetch_trades,
             total_days = all_days.len(),
-            completed = completed.len(),
+            completed = completed_in_range,
             remaining = remaining_days.len(),
             "starting data fetch"
         );

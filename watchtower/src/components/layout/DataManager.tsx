@@ -1,6 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useColors, useModeStore } from "../../hooks";
-import { useKeyboard } from "@opentui/react";
+import { renderProgressBar } from "../../utils/format";
+import {
+  describeDownloadProgress,
+  formatCompactNumber,
+} from "../../utils/dataProgress";
 
 const API_BASE = process.env.PM_SERVER_URL
   ?.replace("/ws", "")
@@ -54,15 +58,6 @@ function formatNumber(n: number): string {
   return n.toString();
 }
 
-function formatPhase(phase?: string | null): string {
-  if (!phase) return "working";
-  if (phase === "fetching_trades") return "fetching trades";
-  if (phase === "fetching_markets") return "fetching markets";
-  if (phase === "complete") return "complete";
-  if (phase === "cancelled") return "cancelled";
-  return phase;
-}
-
 export function DataManager() {
   const colors = useColors();
   const { menuIndex } = useModeStore();
@@ -76,36 +71,22 @@ export function DataManager() {
   const [tradesPresetIndex, setTradesPresetIndex] = useState(1); // 10K default
   const [inTradesPresetMode, setInTradesPresetMode] = useState(false);
 
-  const toggleTradesPresetMode = () => setInTradesPresetMode(!inTradesPresetMode);
-  const moveTradesPresetIndex = (delta: number) => {
-    const newIndex = Math.max(
-      0,
-      Math.min(TRADES_PER_DAY_PRESETS.length - 1, tradesPresetIndex + delta)
-    );
-    setTradesPresetIndex(newIndex);
-  };
-
-  useEffect(() => {
-    fetchAvailability();
-    const interval = setInterval(fetchStatus, 2000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const fetchAvailability = async () => {
+  const fetchAvailability = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/api/data/available`);
       if (res.ok) {
         const data = (await res.json()) as DataAvailability;
         setAvailability(data);
+        setError(null);
       }
     } catch (e) {
       setError("failed to fetch data availability");
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const fetchStatus = async () => {
+  const fetchStatus = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/api/data/status`);
       if (res.ok) {
@@ -118,25 +99,119 @@ export function DataManager() {
     } catch {
       // ignore
     }
-  };
+  }, [fetchAvailability]);
 
   const isFetching = progress?.status === "fetching";
 
-  useKeyboard((key: any) => {
-    if (isFetching) return;
+  const toggleTradesPresetMode = useCallback(() => {
+    setInTradesPresetMode((prev) => !prev);
+  }, []);
 
-    if (key.name === "t") {
-      toggleTradesPresetMode();
-    } else if (inTradesPresetMode) {
-      if (key.name === "j" || key.name === "down") {
-        moveTradesPresetIndex(1);
-      } else if (key.name === "k" || key.name === "up") {
-        moveTradesPresetIndex(-1);
-      } else if (key.name === "escape" || key.name === "h") {
-        setInTradesPresetMode(false);
+  const exitTradesPresetMode = useCallback(() => {
+    setInTradesPresetMode(false);
+  }, []);
+
+  const moveTradesPresetIndex = useCallback((delta: number) => {
+    setTradesPresetIndex((prev) =>
+      Math.max(0, Math.min(TRADES_PER_DAY_PRESETS.length - 1, prev + delta))
+    );
+  }, []);
+
+  const startFetch = useCallback(async () => {
+    const preset = DATE_RANGE_PRESETS[menuIndex];
+    if (!preset) return;
+
+    const end = new Date();
+    const start = new Date();
+    start.setDate(start.getDate() - preset.getDays());
+
+    const startStr = start.toISOString().split("T")[0] ?? "";
+    const endStr = end.toISOString().split("T")[0] ?? "";
+    const tradesPerDay = TRADES_PER_DAY_PRESETS[tradesPresetIndex]?.value ?? 10000;
+
+    setError(null);
+    setProgress({
+      status: "fetching",
+      phase: "fetching_trades",
+      current_day: null,
+      days_complete: 0,
+      days_total: preset.getDays(),
+      trades_fetched: 0,
+      markets_fetched: 0,
+      markets_done: false,
+      error: null,
+    });
+
+    try {
+      const res = await fetch(`${API_BASE}/api/data/fetch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          start_date: startStr,
+          end_date: endStr,
+          trades_per_day: tradesPerDay,
+          fetch_markets: true,
+          fetch_trades: true,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = (await res.json()) as { message?: string };
+        setError(data.message || "failed to start download");
+        setProgress((prev) =>
+          prev
+            ? { ...prev, status: "failed", error: data.message || "failed to start download" }
+            : prev
+        );
       }
+    } catch {
+      setError("couldn't connect to server");
+      setProgress((prev) =>
+        prev
+          ? { ...prev, status: "failed", error: "couldn't connect to server" }
+          : prev
+      );
     }
-  });
+  }, [menuIndex, tradesPresetIndex]);
+
+  const cancelFetch = useCallback(async () => {
+    try {
+      await fetch(`${API_BASE}/api/data/cancel`, { method: "POST" });
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAvailability();
+    const interval = setInterval(fetchStatus, 2000);
+    return () => clearInterval(interval);
+  }, [fetchAvailability, fetchStatus]);
+
+  useEffect(() => {
+    const store = globalThis as Record<string, unknown>;
+    store.__dataManagerActions = {
+      startFetch,
+      cancelFetch,
+      toggleTradesPresetMode,
+      exitTradesPresetMode,
+      moveTradesPresetIndex,
+      isFetching: () => progress?.status === "fetching",
+      isTradesPresetMode: () => inTradesPresetMode,
+    };
+
+    return () => {
+      delete store.__dataManagerActions;
+    };
+  }, [
+    startFetch,
+    cancelFetch,
+    toggleTradesPresetMode,
+    exitTradesPresetMode,
+    moveTradesPresetIndex,
+    progress?.status,
+    inTradesPresetMode,
+  ]);
 
   if (loading) {
     return (
@@ -147,39 +222,58 @@ export function DataManager() {
   }
 
   if (isFetching && progress) {
-    const progressPct =
-      progress.days_total > 0
-        ? Math.round((progress.days_complete / progress.days_total) * 100)
-        : 0;
-    const barWidth = 20;
-    const filled = Math.round((progressPct / 100) * barWidth);
-    const progressBar = "█".repeat(filled) + "░".repeat(barWidth - filled);
+    const download = describeDownloadProgress(progress);
+    const progressBar = renderProgressBar(download.percent, 24);
 
     return (
       <box style={{ flexDirection: "column" }}>
-        <text fg={colors.accent}>downloading data</text>
+        <text fg={colors.accent}>building backtest dataset</text>
 
         <box style={{ marginTop: 1 }}>
-          <text fg={colors.text}>
-            phase: {formatPhase(progress.phase)} | step: {progress.current_day || "..."} ({progress.days_complete}/
-            {progress.days_total})
+          <text fg={colors.textDim}>
+            goal: replay historical markets as a trading simulation
           </text>
         </box>
 
         <box style={{ marginTop: 1 }}>
           <text fg={colors.text}>
-            trades: {formatNumber(progress.trades_fetched)} | markets: {formatNumber(progress.markets_fetched || 0)}
+            stage: {download.title}
+          </text>
+        </box>
+
+        <box>
+          <text fg={colors.text}>
+            now: {download.currentLabel} {download.currentValue}
           </text>
         </box>
 
         <box style={{ marginTop: 1 }}>
           <text fg={colors.accent}>
-            [{progressBar}] {progressPct}%
+            {progressBar} {download.percent}%
           </text>
         </box>
 
-        <box style={{ marginTop: 2 }}>
-          <text fg={colors.warning}>[esc] cancel</text>
+        <box>
+          <text fg={colors.textDim}>
+            {download.progressLabel}
+          </text>
+        </box>
+
+        <box style={{ marginTop: 1 }}>
+          <text fg={colors.text}>
+            stored: {formatCompactNumber(progress.trades_fetched)} trades |{" "}
+            {formatCompactNumber(progress.markets_fetched || 0)} markets
+          </text>
+        </box>
+
+        <box>
+          <text fg={colors.textDim}>
+            trades are the price path. markets provide timing and outcomes.
+          </text>
+        </box>
+
+        <box style={{ marginTop: 1 }}>
+          <text fg={colors.warning}>[esc] cancel download</text>
         </box>
       </box>
     );
@@ -187,7 +281,7 @@ export function DataManager() {
 
   return (
     <box style={{ flexDirection: "column" }}>
-      <text fg={colors.accent}>historical data</text>
+      <text fg={colors.accent}>simulation dataset</text>
 
       {availability?.has_data ? (
         <box style={{ marginTop: 1, flexDirection: "column" }}>
@@ -221,39 +315,44 @@ export function DataManager() {
       </text>
 
       <text fg={colors.text} style={{ marginTop: 1 }}>
-        download more data:
+        add simulation history:
       </text>
 
       <text fg={colors.textDim} style={{ marginTop: 1 }}>
-        trades per day:
+        coverage/day:
       </text>
 
-      <box style={{ flexDirection: "row", marginTop: 0.5 }}>
-        {TRADES_PER_DAY_PRESETS.map((preset, idx) => {
-          const isSelected = idx === tradesPresetIndex;
-          return (
-            <box
-              key={preset.label}
-              style={{
-                flexDirection: "row",
-                backgroundColor: inTradesPresetMode && isSelected ? colors.bgAlt : undefined,
-                marginRight: 1,
-              }}
-            >
-              <text fg={inTradesPresetMode && isSelected ? colors.accent : colors.text}>
-                {inTradesPresetMode && isSelected ? "[" : " "}{preset.label}{inTradesPresetMode && isSelected ? "]" : " "}
+      {inTradesPresetMode ? (
+        <box style={{ flexDirection: "column" }}>
+          {TRADES_PER_DAY_PRESETS.map((preset, idx) => {
+            const isSelected = idx === tradesPresetIndex;
+            return (
+              <text
+                key={preset.label}
+                fg={isSelected ? colors.accent : colors.textDim}
+              >
+                {isSelected ? "> " : "  "}
+                {preset.label} trades/day
               </text>
-            </box>
-          );
-        })}
-      </box>
+            );
+          })}
+        </box>
+      ) : (
+        <text fg={colors.text}>
+          {TRADES_PER_DAY_PRESETS[tradesPresetIndex]?.label ?? "10K"} trades/day
+        </text>
+      )}
+
+      <text fg={colors.textDim}>
+        Higher coverage is slower. Backtests get more price detail.
+      </text>
 
       <text fg={colors.textDim} style={{ marginTop: 1 }}>
         ---
       </text>
 
       <text fg={colors.text} style={{ marginTop: 1 }}>
-        date range:
+        time window:
       </text>
 
       {DATE_RANGE_PRESETS.map((preset, idx) => {
@@ -295,8 +394,8 @@ export function DataManager() {
         </box>
       )}
 
-      <box style={{ flexDirection: "row", gap: 2, marginTop: 2 }}>
-        <text fg={colors.textDim}>[enter] start download</text>
+      <box style={{ flexDirection: "column", marginTop: 2 }}>
+        <text fg={colors.textDim}>[enter] build dataset</text>
         {inTradesPresetMode ? (
           <>
             <text fg={colors.textDim}>[j/k] select trades/day</text>

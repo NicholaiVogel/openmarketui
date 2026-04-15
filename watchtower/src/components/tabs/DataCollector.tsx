@@ -1,7 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
 import { useColors } from "../../hooks";
 import { Panel } from "../shared/Panel";
-import { Gauge } from "../shared/Gauge";
+import { renderProgressBar } from "../../utils/format";
+import {
+  describeDownloadProgress,
+  formatCompactNumber,
+} from "../../utils/dataProgress";
 
 const API_BASE = process.env.PM_SERVER_URL
   ?.replace("/ws", "")
@@ -53,15 +57,6 @@ function formatNumber(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return n.toString();
-}
-
-function formatPhase(phase?: string | null): string {
-  if (!phase) return "working";
-  if (phase === "fetching_trades") return "fetching trades";
-  if (phase === "fetching_markets") return "fetching markets";
-  if (phase === "complete") return "complete";
-  if (phase === "cancelled") return "cancelled";
-  return phase;
 }
 
 interface DataCollectorProps {
@@ -121,6 +116,7 @@ export function DataCollector({ selectedIndex }: DataCollectorProps) {
   }, [fetchAvailability, fetchStatus]);
 
   const isFetching = progress?.status === "fetching";
+  const download = progress ? describeDownloadProgress(progress) : null;
 
   const startFetch = useCallback(async (presetIndex: number) => {
     const preset = DATE_RANGE_PRESETS[presetIndex];
@@ -141,7 +137,7 @@ export function DataCollector({ selectedIndex }: DataCollectorProps) {
       phase: "fetching_trades",
       current_day: null,
       days_complete: 0,
-      days_total: 0,
+      days_total: preset.days,
       trades_fetched: 0,
       markets_fetched: 0,
       markets_done: false,
@@ -205,7 +201,7 @@ export function DataCollector({ selectedIndex }: DataCollectorProps) {
   return (
     <box style={{ flexDirection: "column", flexGrow: 1 }}>
       {/* data inventory */}
-      <Panel title="historical data" marginBottom={1}>
+      <Panel title="simulation dataset" marginBottom={1}>
         {error && !availability?.has_data ? (
           <box style={{ flexDirection: "column", gap: 1 }}>
             <text fg={colors.textDim}>
@@ -262,33 +258,50 @@ export function DataCollector({ selectedIndex }: DataCollectorProps) {
       </Panel>
 
       {/* active download progress */}
-      {isFetching && progress && (
-        <Panel title="downloading" marginBottom={1}>
+      {isFetching && progress && download && (
+        <Panel title="building backtest dataset" marginBottom={1}>
           <box style={{ flexDirection: "column", gap: 1 }}>
-            <box style={{ flexDirection: "row", gap: 3 }}>
+            <text fg={colors.textDim}>
+              Goal: create a historical simulation corpus for replay, training, and backtests.
+            </text>
+
+            <box style={{ flexDirection: "row", gap: 2 }}>
               <text>
-                <span fg={colors.textDim}>phase: </span>
-                <span fg={colors.accent}>{formatPhase(progress.phase)}</span>
+                <span fg={colors.textDim}>stage: </span>
+                <span fg={colors.accent}>{download.title}</span>
               </text>
               <text>
-                <span fg={colors.textDim}>step: </span>
-                <span fg={colors.text}>{progress.current_day || "starting..."}</span>
-              </text>
-              <text>
-                <span fg={colors.textDim}>trades: </span>
-                <span fg={colors.text}>{formatNumber(progress.trades_fetched)}</span>
-              </text>
-              <text>
-                <span fg={colors.textDim}>markets: </span>
-                <span fg={colors.text}>{formatNumber(progress.markets_fetched || 0)}</span>
+                <span fg={colors.textDim}>{download.currentLabel}: </span>
+                <span fg={colors.text}>{download.currentValue}</span>
               </text>
             </box>
-            <Gauge
-              label="progress"
-              value={progress.days_complete}
-              max={Math.max(1, progress.days_total)}
-              suffix={` / ${progress.days_total} days`}
-            />
+
+            <text fg={colors.textDim}>{download.description}</text>
+
+            <box style={{ flexDirection: "row", gap: 1 }}>
+              <text>
+                <span fg={colors.accent}>
+                  {renderProgressBar(download.percent, 36)}
+                </span>
+                <span fg={colors.text}> {download.percent}%</span>
+              </text>
+              <text fg={colors.textDim}>{download.progressLabel}</text>
+            </box>
+
+            <box style={{ flexDirection: "row", gap: 3 }}>
+              <text>
+                <span fg={colors.textDim}>stored trades: </span>
+                <span fg={colors.text}>
+                  {formatCompactNumber(progress.trades_fetched)}
+                </span>
+              </text>
+              <text>
+                <span fg={colors.textDim}>market definitions: </span>
+                <span fg={colors.text}>
+                  {formatCompactNumber(progress.markets_fetched || 0)}
+                </span>
+              </text>
+            </box>
           </box>
         </Panel>
       )}
@@ -311,10 +324,17 @@ export function DataCollector({ selectedIndex }: DataCollectorProps) {
       )}
 
       {/* download settings */}
-      <Panel title="download new data" flexGrow={1}>
+      <Panel title="add simulation history" flexGrow={1}>
         <box style={{ flexDirection: "column", gap: 1 }}>
+          <text fg={colors.textDim}>
+            Downloads trades first, then enriches each traded ticker with market metadata.
+          </text>
+          <text fg={colors.textDim}>
+            Trades give the replay price path. Metadata gives open/close times and outcomes.
+          </text>
+
           {/* time range selection */}
-          <text fg={colors.textDim}>time range:</text>
+          <text fg={colors.textDim}>time window:</text>
           <box style={{ flexDirection: "column" }}>
             {DATE_RANGE_PRESETS.map((preset, idx) => {
               const isSelected = idx === datePresetIndex;
@@ -337,7 +357,7 @@ export function DataCollector({ selectedIndex }: DataCollectorProps) {
 
           {/* trades per day */}
           <box style={{ flexDirection: "row", gap: 1, marginTop: 1 }}>
-            <text fg={colors.textDim}>trades/day limit:</text>
+            <text fg={colors.textDim}>coverage/day:</text>
             {TRADES_PER_DAY_PRESETS.map((preset, idx) => {
               const isSelected = idx === tradesPresetIndex;
               return (
@@ -347,6 +367,9 @@ export function DataCollector({ selectedIndex }: DataCollectorProps) {
               );
             })}
           </box>
+          <text fg={colors.textDim}>
+            Higher coverage is slower, but gives backtests more complete historical replay.
+          </text>
 
           {error && availability?.has_data && (
             <text fg={colors.warning}>{error}</text>
@@ -390,7 +413,9 @@ export function DataCollector({ selectedIndex }: DataCollectorProps) {
               colors.textDim
             }>
               {isFetching
-                ? `${formatPhase(progress?.phase)} ${progress?.current_day || "starting..."}`
+                ? download
+                  ? `${download.title} — ${download.progressLabel}`
+                  : "downloading"
                 : lastResult === "complete"
                 ? "download complete"
                 : lastResult === "failed"

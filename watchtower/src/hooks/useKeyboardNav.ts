@@ -5,12 +5,6 @@ import { useModeStore, EDIT_FIELDS } from "./useModeStore";
 import { keybindings, matchesKey } from "../config/keybindings";
 import type { TradingMode } from "../types/mode";
 
-const API_BASE = process.env.PM_SERVER_URL
-  ?.replace("/ws", "")
-  ?.replace("ws://", "http://")
-  ?.replace("wss://", "https://")
-  || "http://localhost:3030";
-
 interface UseKeyboardNavOptions {
   onQuit?: () => void;
   onReconnect?: () => void;
@@ -76,6 +70,19 @@ export function useKeyboardNav(options: UseKeyboardNavOptions = {}) {
     adjustBacktestSpeed,
   } = useModeStore();
 
+  const getDataManagerActions = () =>
+    (globalThis as Record<string, unknown>).__dataManagerActions as
+      | {
+          startFetch?: () => void;
+          cancelFetch?: () => void;
+          toggleTradesPresetMode?: () => void;
+          exitTradesPresetMode?: () => void;
+          moveTradesPresetIndex?: (delta: number) => void;
+          isFetching?: () => boolean;
+          isTradesPresetMode?: () => boolean;
+        }
+      | undefined;
+
   function handleModeMenuKey(keyName: string | undefined) {
     if (keyName === "escape" || keyName === "h") {
       if (menuScreen === "mode_select") {
@@ -87,7 +94,14 @@ export function useKeyboardNav(options: UseKeyboardNavOptions = {}) {
       } else if (menuScreen === "date_range") {
         setMenuScreen("config_edit");
       } else if (menuScreen === "data_manager") {
-        setMenuScreen("mode_select");
+        const actions = getDataManagerActions();
+        if (actions?.isFetching?.()) {
+          actions.cancelFetch?.();
+        } else if (actions?.isTradesPresetMode?.()) {
+          actions.exitTradesPresetMode?.();
+        } else {
+          setMenuScreen("mode_select");
+        }
       }
       return;
     }
@@ -102,7 +116,12 @@ export function useKeyboardNav(options: UseKeyboardNavOptions = {}) {
       } else if (menuScreen === "date_range") {
         moveDateRangeIndex(1);
       } else if (menuScreen === "data_manager") {
-        moveDateRangeIndex(1);
+        const actions = getDataManagerActions();
+        if (actions?.isTradesPresetMode?.()) {
+          actions.moveTradesPresetIndex?.(1);
+        } else {
+          moveModeMenuIndex(1);
+        }
       }
       return;
     }
@@ -117,7 +136,12 @@ export function useKeyboardNav(options: UseKeyboardNavOptions = {}) {
       } else if (menuScreen === "date_range") {
         moveDateRangeIndex(-1);
       } else if (menuScreen === "data_manager") {
-        moveDateRangeIndex(-1);
+        const actions = getDataManagerActions();
+        if (actions?.isTradesPresetMode?.()) {
+          actions.moveTradesPresetIndex?.(-1);
+        } else {
+          moveModeMenuIndex(-1);
+        }
       }
       return;
     }
@@ -168,6 +192,13 @@ export function useKeyboardNav(options: UseKeyboardNavOptions = {}) {
         deletePreset(menuIndex);
       } else if (menuScreen === "config_edit" && editFieldIndex === EDIT_FIELDS.length) {
         openDateRangePicker();
+      }
+      return;
+    }
+
+    if (keyName === "t" && menuScreen === "data_manager") {
+      if (!getDataManagerActions()?.isFetching?.()) {
+        getDataManagerActions()?.toggleTradesPresetMode?.();
       }
       return;
     }
@@ -275,38 +306,9 @@ export function useKeyboardNav(options: UseKeyboardNavOptions = {}) {
           }
         }
       } else if (menuScreen === "data_manager") {
-        const presets = [7, 30, 60, 90, 180, 365];
-        if (menuIndex < presets.length) {
-          const days = presets[menuIndex];
-          if (days !== undefined) {
-            const end = new Date();
-            const start = new Date();
-            start.setDate(start.getDate() - days);
-
-            const startStr = start.toISOString().split("T")[0] ?? "";
-            const endStr = end.toISOString().split("T")[0] ?? "";
-
-            (async () => {
-              try {
-                const res = await fetch(`${API_BASE}/api/data/fetch`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    start_date: startStr,
-                    end_date: endStr,
-                    trades_per_day: 100_000,
-                  }),
-                });
-
-                if (!res.ok) {
-                  const data = await res.json() as { message?: string };
-                  console.error("fetch failed:", data.message);
-                }
-              } catch (e) {
-                console.error("fetch error:", e);
-              }
-            })();
-          }
+        const actions = getDataManagerActions();
+        if (!actions?.isFetching?.()) {
+          actions?.startFetch?.();
         }
       }
       return;
