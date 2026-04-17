@@ -11,20 +11,40 @@ pub(super) async fn handle(
     command: &SessionsCommand,
 ) -> Result<Value, CliError> {
     match &command.command {
-        SessionsSubcommand::List => list(client).await,
-        SessionsSubcommand::Show => client.get_value("/api/session/status").await,
+        SessionsSubcommand::List { limit } => list(client, *limit).await,
+        SessionsSubcommand::Show { id } => show(client, id.as_deref()).await,
         SessionsSubcommand::Create(args) => create(cli, client, args).await,
         SessionsSubcommand::Stop => stop(cli, client).await,
     }
 }
 
-async fn list(client: &DaemonClient) -> Result<Value, CliError> {
+async fn list(client: &DaemonClient, limit: u32) -> Result<Value, CliError> {
     let active = client.get_value("/api/session/status").await?;
+    let history = client
+        .get_value(&format!("/api/sessions?limit={limit}"))
+        .await?;
     Ok(json!({
         "active": active,
-        "history": [],
-        "history_available": false,
+        "history": history,
+        "history_available": true,
     }))
+}
+
+async fn show(client: &DaemonClient, id: Option<&str>) -> Result<Value, CliError> {
+    let Some(id) = id else {
+        return client.get_value("/api/session/status").await;
+    };
+
+    match client.get_value(&format!("/api/sessions/{id}")).await {
+        Ok(value) => Ok(value),
+        Err(CliError::DaemonStatus { status, .. }) if status == reqwest::StatusCode::NOT_FOUND => {
+            Err(CliError::NotFound {
+                resource: "session".to_string(),
+                id: id.to_string(),
+            })
+        }
+        Err(err) => Err(err),
+    }
 }
 
 async fn create(

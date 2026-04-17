@@ -639,6 +639,104 @@ impl SqliteStore {
         row.map(BacktestRunRecord::try_from).transpose()
     }
 
+    /// Record a session when the daemon accepts it as active.
+    pub async fn record_session_started(&self, session: &NewSessionRun) -> anyhow::Result<i64> {
+        let config_json = session
+            .config
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
+
+        let result = sqlx::query(
+            "INSERT INTO session_runs \
+             (session_id, mode, status, started_at, trading_active, config_json) \
+             VALUES (?1, ?2, 'running', ?3, 1, ?4)",
+        )
+        .bind(&session.session_id)
+        .bind(&session.mode)
+        .bind(session.started_at.to_rfc3339())
+        .bind(config_json)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.last_insert_rowid())
+    }
+
+    /// Update the stored config for an active session.
+    pub async fn update_session_config(
+        &self,
+        session_id: &str,
+        config: Option<&serde_json::Value>,
+    ) -> anyhow::Result<()> {
+        let config_json = config.map(serde_json::to_string).transpose()?;
+        sqlx::query("UPDATE session_runs SET config_json = ?2 WHERE session_id = ?1")
+            .bind(session_id)
+            .bind(config_json)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Mark a session as ended.
+    pub async fn finish_session_run(
+        &self,
+        session_id: &str,
+        status: &str,
+        stop_reason: Option<&str>,
+    ) -> anyhow::Result<()> {
+        sqlx::query(
+            "UPDATE session_runs SET ended_at = ?2, status = ?3, trading_active = 0, stop_reason = ?4 \
+             WHERE session_id = ?1",
+        )
+        .bind(session_id)
+        .bind(Utc::now().to_rfc3339())
+        .bind(status)
+        .bind(stop_reason)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Get recent sessions, newest first.
+    pub async fn get_recent_session_runs(
+        &self,
+        limit: u32,
+    ) -> anyhow::Result<Vec<SessionRunRecord>> {
+        let rows = sqlx::query_as::<_, SessionRunRow>(
+            "SELECT id, session_id, mode, status, started_at, ended_at, trading_active, config_json, stop_reason \
+             FROM session_runs ORDER BY id DESC LIMIT ?1",
+        )
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(SessionRunRecord::try_from).collect()
+    }
+
+    /// Get a session run by numeric ID or daemon session ID.
+    pub async fn get_session_run(&self, key: &str) -> anyhow::Result<Option<SessionRunRecord>> {
+        let row = if let Ok(id) = key.parse::<i64>() {
+            sqlx::query_as::<_, SessionRunRow>(
+                "SELECT id, session_id, mode, status, started_at, ended_at, trading_active, config_json, stop_reason \
+                 FROM session_runs WHERE id = ?1",
+            )
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?
+        } else {
+            sqlx::query_as::<_, SessionRunRow>(
+                "SELECT id, session_id, mode, status, started_at, ended_at, trading_active, config_json, stop_reason \
+                 FROM session_runs WHERE session_id = ?1",
+            )
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await?
+        };
+
+        row.map(SessionRunRecord::try_from).transpose()
+    }
+
     /// Get decisions for a specific ticker
     pub async fn get_decisions_for_ticker(
         &self,
@@ -1332,6 +1430,69 @@ impl TryFrom<BacktestRunRow> for BacktestRunRecord {
     }
 }
 
+/// A session run accepted by the daemon.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewSessionRun {
+    pub session_id: String,
+    pub mode: String,
+    pub started_at: DateTime<Utc>,
+    pub config: Option<serde_json::Value>,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct SessionRunRow {
+    id: i64,
+    session_id: String,
+    mode: String,
+    status: String,
+    started_at: String,
+    ended_at: Option<String>,
+    trading_active: i64,
+    config_json: Option<String>,
+    stop_reason: Option<String>,
+}
+
+/// A durable session run record.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionRunRecord {
+    pub id: i64,
+    pub session_id: String,
+    pub mode: String,
+    pub status: String,
+    pub started_at: DateTime<Utc>,
+    pub ended_at: Option<DateTime<Utc>>,
+    pub trading_active: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config: Option<serde_json::Value>,
+    pub stop_reason: Option<String>,
+}
+
+impl TryFrom<SessionRunRow> for SessionRunRecord {
+    type Error = anyhow::Error;
+
+    fn try_from(row: SessionRunRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: row.id,
+            session_id: row.session_id,
+            mode: row.mode,
+            status: row.status,
+            started_at: row.started_at.parse::<DateTime<Utc>>()?,
+            ended_at: row
+                .ended_at
+                .as_deref()
+                .map(str::parse::<DateTime<Utc>>)
+                .transpose()?,
+            trading_active: row.trading_active != 0,
+            config: row
+                .config_json
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()?,
+            stop_reason: row.stop_reason,
+        })
+    }
+}
+
 /// A cached market entry
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MarketCacheEntry {
@@ -1465,6 +1626,73 @@ mod tests {
             .get_recent_backtest_runs(10)
             .await
             .expect("recent runs fetch");
+        assert_eq!(recent.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn persists_session_run_lifecycle() {
+        let file = NamedTempFile::new().expect("temp db");
+        let store = SqliteStore::new(file.path().to_str().expect("utf8 path"))
+            .await
+            .expect("store opens");
+
+        let started_at = Utc::now();
+        let config = json!({
+            "initial_capital": 10000.0,
+            "max_positions": 10
+        });
+        let session = NewSessionRun {
+            session_id: "session-test-1".to_string(),
+            mode: "paper".to_string(),
+            started_at,
+            config: Some(config.clone()),
+        };
+
+        let id = store
+            .record_session_started(&session)
+            .await
+            .expect("session start records");
+        assert_eq!(id, 1);
+
+        let running = store
+            .get_session_run("session-test-1")
+            .await
+            .expect("session fetch works")
+            .expect("session exists");
+        assert_eq!(running.status, "running");
+        assert_eq!(running.mode, "paper");
+        assert!(running.trading_active);
+        assert_eq!(running.config.as_ref(), Some(&config));
+
+        let updated = json!({
+            "initial_capital": 5000.0,
+            "max_positions": 5
+        });
+        store
+            .update_session_config("session-test-1", Some(&updated))
+            .await
+            .expect("session config updates");
+
+        store
+            .finish_session_run("session-test-1", "stopped", Some("test stop"))
+            .await
+            .expect("session finishes");
+
+        let stopped = store
+            .get_session_run("1")
+            .await
+            .expect("session fetch by id works")
+            .expect("session exists by id");
+        assert_eq!(stopped.status, "stopped");
+        assert!(!stopped.trading_active);
+        assert_eq!(stopped.stop_reason.as_deref(), Some("test stop"));
+        assert_eq!(stopped.config.as_ref(), Some(&updated));
+        assert!(stopped.ended_at.is_some());
+
+        let recent = store
+            .get_recent_session_runs(10)
+            .await
+            .expect("recent sessions fetch");
         assert_eq!(recent.len(), 1);
     }
 }

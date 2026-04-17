@@ -236,6 +236,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/backtest/runs/{id}", get(handlers::get_backtest_run))
         .route("/api/backtest/stop", post(handlers::post_backtest_stop))
         // session control
+        .route("/api/sessions", get(handlers::get_sessions))
+        .route("/api/sessions/{id}", get(handlers::get_session_run))
         .route("/api/session/start", post(handlers::post_session_start))
         .route("/api/session/stop", post(handlers::post_session_stop))
         .route("/api/session/config", post(handlers::post_session_config))

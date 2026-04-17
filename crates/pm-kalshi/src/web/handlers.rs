@@ -3,15 +3,18 @@
 use super::{AppState, BacktestRunStatus, SessionConfig, SessionMode};
 use crate::backtest::Backtester;
 use crate::data::HistoricalData;
-use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
+use axum::Json;
 use chrono::Utc;
 use pm_core::{BacktestConfig, ExitConfig};
 use pm_engine::PositionSizingConfig;
-use pm_store::{AuditEvent, BacktestRunRecord, DecisionRecord, NewAuditEvent, NewBacktestRun};
-use rust_decimal::Decimal;
+use pm_store::{
+    AuditEvent, BacktestRunRecord, DecisionRecord, NewAuditEvent, NewBacktestRun, NewSessionRun,
+    SessionRunRecord,
+};
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::{error, info};
@@ -383,6 +386,35 @@ pub struct BacktestErrorResponse {
     pub error: String,
 }
 
+async fn finish_backtest_session(
+    store: &Arc<pm_store::SqliteStore>,
+    session_state: &Arc<tokio::sync::RwLock<super::SessionState>>,
+    status: &str,
+    reason: Option<&str>,
+) {
+    let session_id = {
+        let session = session_state.read().await;
+        if session.mode == SessionMode::Backtest && !session.session_id.is_empty() {
+            Some(session.session_id.clone())
+        } else {
+            None
+        }
+    };
+
+    let Some(session_id) = session_id else {
+        return;
+    };
+
+    if let Err(e) = store.finish_session_run(&session_id, status, reason).await {
+        error!(session_id = %session_id, status = %status, error = %e, "failed to persist session end");
+    }
+
+    let mut session = session_state.write().await;
+    if session.mode == SessionMode::Backtest && session.session_id == session_id {
+        *session = super::SessionState::default();
+    }
+}
+
 async fn mark_backtest_failed(
     store: &Arc<pm_store::SqliteStore>,
     backtest_state: &Arc<tokio::sync::Mutex<super::BacktestState>>,
@@ -403,10 +435,7 @@ async fn mark_backtest_failed(
         error!(run_id = %run_id, error = %e, "failed to persist failed backtest run");
     }
 
-    let mut session = session_state.write().await;
-    if session.mode == SessionMode::Backtest {
-        *session = super::SessionState::default();
-    }
+    finish_backtest_session(store, session_state, "failed", Some(&message)).await;
 }
 
 pub async fn post_backtest_run(
@@ -615,10 +644,7 @@ pub async fn post_backtest_run(
         guard.status = BacktestRunStatus::Complete;
         guard.result = Some(result);
 
-        let mut session = session_state.write().await;
-        if session.mode == SessionMode::Backtest {
-            *session = super::SessionState::default();
-        }
+        finish_backtest_session(&run_store, &session_state, "complete", None).await;
     });
 
     Ok(StatusCode::OK)
@@ -749,7 +775,11 @@ pub async fn post_backtest_stop(State(state): State<Arc<AppState>>) -> StatusCod
         guard.progress = None;
         guard.live_snapshot = None;
         // Keep result if there was one. Only a running job should rewrite durable history as stopped.
-        if was_running { run_id } else { None }
+        if was_running {
+            run_id
+        } else {
+            None
+        }
     };
 
     if let Some(run_id) = stopped_run_id {
@@ -762,13 +792,13 @@ pub async fn post_backtest_stop(State(state): State<Arc<AppState>>) -> StatusCod
         }
     }
 
-    // Also reset session state
-    {
-        let mut session = state.session.write().await;
-        if session.mode == super::SessionMode::Backtest {
-            *session = super::SessionState::default();
-        }
-    }
+    finish_backtest_session(
+        &state.store,
+        &state.session,
+        "stopped",
+        Some("backtest stopped/reset via API"),
+    )
+    .await;
 
     info!("backtest stopped/reset via API");
     StatusCode::OK
@@ -805,6 +835,104 @@ pub struct SessionErrorResponse {
     pub error: String,
 }
 
+#[derive(Deserialize)]
+pub struct SessionsQuery {
+    #[serde(default = "default_sessions_limit")]
+    pub limit: u32,
+}
+
+fn default_sessions_limit() -> u32 {
+    25
+}
+
+fn session_error(
+    status: StatusCode,
+    error: impl Into<String>,
+) -> (StatusCode, Json<SessionErrorResponse>) {
+    (
+        status,
+        Json(SessionErrorResponse {
+            error: error.into(),
+        }),
+    )
+}
+
+fn session_config_value(
+    config: Option<&SessionConfig>,
+) -> Result<Option<serde_json::Value>, (StatusCode, Json<SessionErrorResponse>)> {
+    config
+        .map(serde_json::to_value)
+        .transpose()
+        .map_err(|e| session_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+async fn persist_session_started(
+    state: &Arc<AppState>,
+    session: &super::SessionState,
+) -> Result<(), (StatusCode, Json<SessionErrorResponse>)> {
+    state
+        .store
+        .record_session_started(&NewSessionRun {
+            session_id: session.session_id.clone(),
+            mode: session.mode.to_string(),
+            started_at: session.started_at.clone().unwrap_or_else(Utc::now),
+            config: session_config_value(session.config.as_ref())?,
+        })
+        .await
+        .map(|_| ())
+        .map_err(|e| {
+            error!(session_id = %session.session_id, error = %e, "failed to persist session start");
+            session_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to persist session start",
+            )
+        })
+}
+
+async fn finish_session_record(
+    state: &Arc<AppState>,
+    session_id: &str,
+    status: &str,
+    reason: Option<&str>,
+) {
+    if let Err(e) = state
+        .store
+        .finish_session_run(session_id, status, reason)
+        .await
+    {
+        error!(session_id = %session_id, status = %status, error = %e, "failed to persist session end");
+    }
+}
+
+pub async fn get_sessions(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<SessionsQuery>,
+) -> Result<Json<Vec<SessionRunRecord>>, StatusCode> {
+    state
+        .store
+        .get_recent_session_runs(query.limit)
+        .await
+        .map(Json)
+        .map_err(|e| {
+            error!(error = %e, "failed to get session runs");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
+}
+
+pub async fn get_session_run(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<SessionRunRecord>, StatusCode> {
+    match state.store.get_session_run(&id).await {
+        Ok(Some(run)) => Ok(Json(run)),
+        Ok(None) => Err(StatusCode::NOT_FOUND),
+        Err(e) => {
+            error!(id = %id, error = %e, "failed to get session run");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
 pub async fn post_session_start(
     State(state): State<Arc<AppState>>,
     Json(req): Json<SessionStartRequest>,
@@ -812,20 +940,20 @@ pub async fn post_session_start(
     {
         let session = state.session.read().await;
         if session.trading_active {
-            return Err((
+            return Err(session_error(
                 StatusCode::CONFLICT,
-                Json(SessionErrorResponse {
-                    error: "session already running".into(),
-                }),
+                "session already running",
             ));
         }
     }
 
     match req.mode {
         SessionMode::Paper => {
+            let session = super::SessionState::new_session(SessionMode::Paper, req.config);
+            persist_session_started(&state, &session).await?;
             {
-                let mut session = state.session.write().await;
-                *session = super::SessionState::new_session(SessionMode::Paper, req.config);
+                let mut active = state.session.write().await;
+                *active = session;
             }
 
             state.engine.resume().await;
@@ -835,19 +963,28 @@ pub async fn post_session_start(
         SessionMode::Backtest => {
             let config = req.config;
             let start = config.backtest_start.clone().ok_or_else(|| {
-                (
+                session_error(
                     StatusCode::BAD_REQUEST,
-                    Json(SessionErrorResponse {
-                        error: "backtest_start required for backtest mode".into(),
-                    }),
+                    "backtest_start required for backtest mode",
                 )
             })?;
             let end = config.backtest_end.clone().ok_or_else(|| {
-                (
+                session_error(
                     StatusCode::BAD_REQUEST,
-                    Json(SessionErrorResponse {
-                        error: "backtest_end required for backtest mode".into(),
-                    }),
+                    "backtest_end required for backtest mode",
+                )
+            })?;
+
+            crate::parse_date(&start).map_err(|e| {
+                session_error(
+                    StatusCode::BAD_REQUEST,
+                    format!("invalid backtest_start: {e}"),
+                )
+            })?;
+            crate::parse_date(&end).map_err(|e| {
+                session_error(
+                    StatusCode::BAD_REQUEST,
+                    format!("invalid backtest_end: {e}"),
                 )
             })?;
 
@@ -866,43 +1003,71 @@ pub async fn post_session_start(
                 data_source: None,
             };
 
-            let state_for_backtest = state.clone();
-            post_backtest_run(State(state_for_backtest), Json(backtest_req))
-                .await
-                .map_err(|(code, Json(e))| {
-                    (
-                        code,
-                        Json(SessionErrorResponse {
-                            error: e.error.clone(),
-                        }),
-                    )
-                })?;
-
+            let session = super::SessionState::new_session(SessionMode::Backtest, config);
+            let session_id = session.session_id.clone();
+            persist_session_started(&state, &session).await?;
             {
-                let mut session = state.session.write().await;
-                *session = super::SessionState::new_session(SessionMode::Backtest, config);
+                let mut active = state.session.write().await;
+                *active = session;
             }
+
+            let state_for_backtest = state.clone();
+            if let Err((code, Json(e))) =
+                post_backtest_run(State(state_for_backtest), Json(backtest_req)).await
+            {
+                {
+                    let mut active = state.session.write().await;
+                    if active.session_id == session_id {
+                        *active = super::SessionState::default();
+                    }
+                }
+                finish_session_record(&state, &session_id, "failed", Some(&e.error)).await;
+                return Err((code, Json(SessionErrorResponse { error: e.error })));
+            }
+
             Ok(StatusCode::OK)
         }
-        SessionMode::Live => Err((
+        SessionMode::Live => Err(session_error(
             StatusCode::NOT_IMPLEMENTED,
-            Json(SessionErrorResponse {
-                error: "live trading not yet implemented".into(),
-            }),
+            "live trading not yet implemented",
         )),
         SessionMode::Idle => {
-            let mut session = state.session.write().await;
-            session.mode = SessionMode::Idle;
-            session.trading_active = false;
+            let stopped_session_id = {
+                let mut session = state.session.write().await;
+                let id = (!session.session_id.is_empty()).then(|| session.session_id.clone());
+                *session = super::SessionState::default();
+                id
+            };
+            if let Some(session_id) = stopped_session_id {
+                finish_session_record(
+                    &state,
+                    &session_id,
+                    "stopped",
+                    Some("session set idle via API"),
+                )
+                .await;
+            }
             Ok(StatusCode::OK)
         }
     }
 }
 
 pub async fn post_session_stop(State(state): State<Arc<AppState>>) -> StatusCode {
-    {
+    let stopped_session_id = {
         let mut session = state.session.write().await;
+        let id = (!session.session_id.is_empty()).then(|| session.session_id.clone());
         *session = super::SessionState::default();
+        id
+    };
+
+    if let Some(session_id) = stopped_session_id {
+        finish_session_record(
+            &state,
+            &session_id,
+            "stopped",
+            Some("session stopped via API"),
+        )
+        .await;
     }
 
     state
@@ -917,8 +1082,29 @@ pub async fn post_session_config(
     State(state): State<Arc<AppState>>,
     Json(config): Json<SessionConfig>,
 ) -> StatusCode {
-    let mut session = state.session.write().await;
-    session.config = Some(config);
+    let session_id = {
+        let mut session = state.session.write().await;
+        session.config = Some(config.clone());
+        (!session.session_id.is_empty()).then(|| session.session_id.clone())
+    };
+
+    if let Some(session_id) = session_id {
+        match serde_json::to_value(&config) {
+            Ok(config_value) => {
+                if let Err(e) = state
+                    .store
+                    .update_session_config(&session_id, Some(&config_value))
+                    .await
+                {
+                    error!(session_id = %session_id, error = %e, "failed to persist session config update");
+                }
+            }
+            Err(e) => {
+                error!(session_id = %session_id, error = %e, "failed to serialize session config update")
+            }
+        }
+    }
+
     info!("session config updated via API");
     StatusCode::OK
 }

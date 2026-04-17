@@ -9,7 +9,7 @@ tags:
   - daemon
   - parity
 created: 2026-04-15
-modified: 2026-04-16
+modified: 2026-04-17
 title: Phase One Daemon and CLI Parity Audit
 ---
 
@@ -156,9 +156,13 @@ As of 2026-04-17, the first Rust `omu` slice is in place:
   `GET /api/backtest/runs`, `GET /api/backtest/runs/{id}`, and
   `omu backtest list|show|compare`. Attached runs include the daemon `run_id`
   so the latest result can be tied back to history.
+- Added durable session history through the SQLite `session_runs` table,
+  `GET /api/sessions`, `GET /api/sessions/{id}`, and
+  `omu sessions list|show`. Paper and backtest session lifecycle is now recorded
+  as running, stopped, complete, or failed through the daemon.
 
-The next major parity gaps are position redeem controls, auth commands, durable
-session history, and OpenTelemetry trace propagation.
+The next major parity gaps are position redeem controls, auth commands, and
+OpenTelemetry trace propagation.
 
 ## Architecture target
 
@@ -238,7 +242,7 @@ second engine.
 
 | State | Owner | Clients read through | Notes |
 |---|---|---|---|
-| Session mode and active config | Daemon memory | `/api/session/status` | Runtime authority. |
+| Session mode and active config | Daemon memory plus SQLite via daemon | `/api/session/status`, `/api/sessions` | Runtime authority plus durable lifecycle history. |
 | Engine status | Daemon memory | `/api/status`, `/ws` | Includes state, uptime, tick count, last tick. |
 | Portfolio snapshot | Daemon memory plus store | `/api/portfolio`, `/ws` | Runtime state should win over direct DB reads. |
 | Open positions | Daemon memory | `/api/positions`, `/ws` | Durable positions can be restored at daemon boot. |
@@ -262,10 +266,10 @@ This maps Phase One CLI commands to the current Watchtower or daemon surface.
 | `omu daemon start` | Start foreground/background daemon | Existing `kalshi paper` starts engine and web server | Decide whether `omu daemon start` wraps `pm-kalshi` or a new daemon binary. |
 | `omu daemon stop` | Stop daemon | Partial session stop exists | Need process-level stop or graceful shutdown endpoint. |
 | `omu daemon logs` | Inspect daemon logs | Not exposed | Usually local process manager concern. Can defer. |
-| `omu sessions list` | Show known sessions | `/api/session/status` | Implemented as active session plus empty history marker. Durable history later. |
-| `omu sessions show` | Show active/session details | `/api/session/status` | Implemented. |
-| `omu sessions create` | Start paper/backtest/live session | `/api/session/start` | Implemented for paper/backtest. Live returns `POLICY_BLOCKED`. |
-| `omu sessions stop` | Stop current session | `/api/session/stop` | Exists. |
+| `omu sessions list` | Show known sessions | `/api/session/status`, `/api/sessions` | Implemented as active session plus durable history. |
+| `omu sessions show` | Show active/session details | `/api/session/status`, `/api/sessions/{id}` | Implemented for active and historical sessions. |
+| `omu sessions create` | Start paper/backtest/live session | `/api/session/start` | Implemented for paper/backtest with durable lifecycle records. Live returns `POLICY_BLOCKED`. |
+| `omu sessions stop` | Stop current session | `/api/session/stop` | Implemented and records stopped lifecycle state. |
 | `omu portfolio summary` | Cash, equity, return, drawdown | `/api/portfolio` | Existing response lacks realized/unrealized P&L present in WS snapshot. Align shapes. |
 | `omu portfolio history` | Equity history | `/api/equity` | Existing. |
 | `omu portfolio equity-curve` | Machine-readable equity curve | `/api/equity` | Existing. |
@@ -640,13 +644,14 @@ Until then, `omu sessions create --mode live` should return a stable
 
 ## Recommended next move
 
-Start with the short path:
+Keep the short path and close the remaining trust gates:
 
-1. Add `crates/omu` as a Rust CLI client.
-2. Add `GET /api/snapshot` and decisions routes to the active `pm-kalshi` daemon.
-3. Implement read-only CLI parity first.
-4. Use the existing daemon/web process as the source of truth.
-5. Only then add controlled mutation commands.
+1. Add position redeem controls once Kalshi live-mode semantics are clear.
+2. Add redacted auth commands and daemon auth-status checks.
+3. Add OpenTelemetry spans and trace IDs across CLI commands, daemon handlers,
+   session lifecycle, backtests, and execution.
+4. Continue aligning REST and WebSocket response shapes so Watchtower and `omu`
+   stay attached to the same source of truth.
 
 This keeps the system honest: one daemon, two attached operator surfaces, no
 split-brain trading logic.

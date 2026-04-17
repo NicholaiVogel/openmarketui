@@ -337,8 +337,13 @@ pub(crate) struct SessionsCommand {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum SessionsSubcommand {
-    List,
-    Show,
+    List {
+        #[arg(long, default_value_t = 25)]
+        limit: u32,
+    },
+    Show {
+        id: Option<String>,
+    },
     Create(SessionCreateArgs),
     Stop,
 }

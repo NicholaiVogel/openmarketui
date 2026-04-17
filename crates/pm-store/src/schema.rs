@@ -125,6 +125,22 @@ CREATE TABLE IF NOT EXISTS backtest_runs (
 CREATE INDEX IF NOT EXISTS idx_backtest_runs_started_at ON backtest_runs(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_backtest_runs_status ON backtest_runs(status);
 
+CREATE TABLE IF NOT EXISTS session_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL UNIQUE,
+    mode TEXT NOT NULL,
+    status TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    trading_active INTEGER NOT NULL DEFAULT 1,
+    config_json TEXT,
+    stop_reason TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_runs_started_at ON session_runs(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_session_runs_status ON session_runs(status);
+CREATE INDEX IF NOT EXISTS idx_session_runs_mode ON session_runs(mode);
+
 CREATE TABLE IF NOT EXISTS market_cache (
     ticker TEXT PRIMARY KEY,
     title TEXT NOT NULL,
