@@ -32,6 +32,14 @@ impl SqliteStore {
         Ok(())
     }
 
+    fn json_metric_f64(value: &serde_json::Value, key: &str) -> Option<f64> {
+        value.get(key).and_then(serde_json::Value::as_f64)
+    }
+
+    fn json_metric_i64(value: &serde_json::Value, key: &str) -> Option<i64> {
+        value.get(key).and_then(serde_json::Value::as_i64)
+    }
+
     /// Load the portfolio state from the database
     pub async fn load_portfolio(&self) -> anyhow::Result<Option<Portfolio>> {
         let row = sqlx::query_as::<_, (String, String, Option<String>)>(
@@ -458,6 +466,177 @@ impl SqliteStore {
             }
             None => Ok(None),
         }
+    }
+
+    /// Record an audit event
+    pub async fn record_audit_event(&self, event: &NewAuditEvent) -> anyhow::Result<i64> {
+        let request_json = event
+            .request
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
+        let result_json = event
+            .result
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
+
+        let result = sqlx::query(
+            "INSERT INTO audit_events \
+             (timestamp, actor, command, profile, dry_run, request_json, result_json, trace_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        )
+        .bind(Utc::now().to_rfc3339())
+        .bind(&event.actor)
+        .bind(&event.command)
+        .bind(&event.profile)
+        .bind(if event.dry_run { 1_i64 } else { 0_i64 })
+        .bind(request_json)
+        .bind(result_json)
+        .bind(&event.trace_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.last_insert_rowid())
+    }
+
+    /// Get recent audit events
+    pub async fn get_recent_audit_events(&self, limit: u32) -> anyhow::Result<Vec<AuditEvent>> {
+        let rows = sqlx::query_as::<_, AuditEventRow>(
+            "SELECT id, timestamp, actor, command, profile, dry_run, request_json, result_json, trace_id \
+             FROM audit_events ORDER BY id DESC LIMIT ?1",
+        )
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(AuditEvent::try_from).collect()
+    }
+
+    /// Record a backtest run when the daemon accepts it.
+    pub async fn record_backtest_run_started(&self, run: &NewBacktestRun) -> anyhow::Result<i64> {
+        let result = sqlx::query(
+            "INSERT INTO backtest_runs \
+             (run_id, started_at, status, start_time, end_time, capital, max_positions, \
+              max_position, interval_hours, kelly_fraction, max_position_pct, take_profit, \
+              stop_loss, max_hold_hours, data_source) \
+             VALUES (?1, ?2, 'running', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+        )
+        .bind(&run.run_id)
+        .bind(run.started_at.to_rfc3339())
+        .bind(run.start_time.to_rfc3339())
+        .bind(run.end_time.to_rfc3339())
+        .bind(run.capital)
+        .bind(run.max_positions as i64)
+        .bind(run.max_position as i64)
+        .bind(run.interval_hours)
+        .bind(run.kelly_fraction)
+        .bind(run.max_position_pct)
+        .bind(run.take_profit)
+        .bind(run.stop_loss)
+        .bind(run.max_hold_hours)
+        .bind(&run.data_source)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.last_insert_rowid())
+    }
+
+    /// Mark a backtest run as complete and store its result payload.
+    pub async fn complete_backtest_run(
+        &self,
+        run_id: &str,
+        result: &serde_json::Value,
+    ) -> anyhow::Result<()> {
+        let result_json = serde_json::to_string(result)?;
+        sqlx::query(
+            "UPDATE backtest_runs SET \
+             completed_at = ?2, status = 'complete', total_return = ?3, total_return_pct = ?4, \
+             sharpe_ratio = ?5, max_drawdown_pct = ?6, win_rate = ?7, total_trades = ?8, \
+             result_json = ?9, error = NULL \
+             WHERE run_id = ?1",
+        )
+        .bind(run_id)
+        .bind(Utc::now().to_rfc3339())
+        .bind(Self::json_metric_f64(result, "total_return"))
+        .bind(Self::json_metric_f64(result, "total_return_pct"))
+        .bind(Self::json_metric_f64(result, "sharpe_ratio"))
+        .bind(Self::json_metric_f64(result, "max_drawdown_pct"))
+        .bind(Self::json_metric_f64(result, "win_rate"))
+        .bind(Self::json_metric_i64(result, "total_trades"))
+        .bind(result_json)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Mark a backtest run as failed or stopped.
+    pub async fn finish_backtest_run_with_error(
+        &self,
+        run_id: &str,
+        status: &str,
+        error: &str,
+    ) -> anyhow::Result<()> {
+        sqlx::query(
+            "UPDATE backtest_runs SET completed_at = ?2, status = ?3, error = ?4 WHERE run_id = ?1",
+        )
+        .bind(run_id)
+        .bind(Utc::now().to_rfc3339())
+        .bind(status)
+        .bind(error)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Get recent backtest runs, newest first.
+    pub async fn get_recent_backtest_runs(
+        &self,
+        limit: u32,
+    ) -> anyhow::Result<Vec<BacktestRunRecord>> {
+        let rows = sqlx::query_as::<_, BacktestRunRow>(
+            "SELECT id, run_id, started_at, completed_at, status, start_time, end_time, capital, \
+             max_positions, max_position, interval_hours, kelly_fraction, max_position_pct, \
+             take_profit, stop_loss, max_hold_hours, data_source, total_return, total_return_pct, \
+             sharpe_ratio, max_drawdown_pct, win_rate, total_trades, result_json, error \
+             FROM backtest_runs ORDER BY id DESC LIMIT ?1",
+        )
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(BacktestRunRecord::try_from).collect()
+    }
+
+    /// Get a backtest run by numeric ID or daemon run ID.
+    pub async fn get_backtest_run(&self, key: &str) -> anyhow::Result<Option<BacktestRunRecord>> {
+        let row = if let Ok(id) = key.parse::<i64>() {
+            sqlx::query_as::<_, BacktestRunRow>(
+                "SELECT id, run_id, started_at, completed_at, status, start_time, end_time, capital, \
+                 max_positions, max_position, interval_hours, kelly_fraction, max_position_pct, \
+                 take_profit, stop_loss, max_hold_hours, data_source, total_return, total_return_pct, \
+                 sharpe_ratio, max_drawdown_pct, win_rate, total_trades, result_json, error \
+                 FROM backtest_runs WHERE id = ?1",
+            )
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?
+        } else {
+            sqlx::query_as::<_, BacktestRunRow>(
+                "SELECT id, run_id, started_at, completed_at, status, start_time, end_time, capital, \
+                 max_positions, max_position, interval_hours, kelly_fraction, max_position_pct, \
+                 take_profit, stop_loss, max_hold_hours, data_source, total_return, total_return_pct, \
+                 sharpe_ratio, max_drawdown_pct, win_rate, total_trades, result_json, error \
+                 FROM backtest_runs WHERE run_id = ?1",
+            )
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await?
+        };
+
+        row.map(BacktestRunRecord::try_from).transpose()
     }
 
     /// Get decisions for a specific ticker
@@ -966,6 +1145,193 @@ pub struct DecisionRecord {
     pub latency_ms: Option<i64>,
 }
 
+/// An audit event to record
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewAuditEvent {
+    pub actor: String,
+    pub command: String,
+    pub profile: Option<String>,
+    pub dry_run: bool,
+    pub request: Option<serde_json::Value>,
+    pub result: Option<serde_json::Value>,
+    pub trace_id: Option<String>,
+}
+
+/// Internal row type for audit queries
+#[derive(Debug, sqlx::FromRow)]
+struct AuditEventRow {
+    id: i64,
+    timestamp: String,
+    actor: String,
+    command: String,
+    profile: Option<String>,
+    dry_run: i64,
+    request_json: Option<String>,
+    result_json: Option<String>,
+    trace_id: Option<String>,
+}
+
+/// A recorded audit event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditEvent {
+    pub id: i64,
+    pub timestamp: DateTime<Utc>,
+    pub actor: String,
+    pub command: String,
+    pub profile: Option<String>,
+    pub dry_run: bool,
+    pub request: Option<serde_json::Value>,
+    pub result: Option<serde_json::Value>,
+    pub trace_id: Option<String>,
+}
+
+impl TryFrom<AuditEventRow> for AuditEvent {
+    type Error = anyhow::Error;
+
+    fn try_from(row: AuditEventRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: row.id,
+            timestamp: row.timestamp.parse::<DateTime<Utc>>()?,
+            actor: row.actor,
+            command: row.command,
+            profile: row.profile,
+            dry_run: row.dry_run != 0,
+            request: row
+                .request_json
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()?,
+            result: row
+                .result_json
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()?,
+            trace_id: row.trace_id,
+        })
+    }
+}
+
+/// A backtest run accepted by the daemon.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewBacktestRun {
+    pub run_id: String,
+    pub started_at: DateTime<Utc>,
+    pub start_time: DateTime<Utc>,
+    pub end_time: DateTime<Utc>,
+    pub capital: f64,
+    pub max_positions: usize,
+    pub max_position: u64,
+    pub interval_hours: i64,
+    pub kelly_fraction: f64,
+    pub max_position_pct: f64,
+    pub take_profit: f64,
+    pub stop_loss: f64,
+    pub max_hold_hours: i64,
+    pub data_source: String,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct BacktestRunRow {
+    id: i64,
+    run_id: String,
+    started_at: String,
+    completed_at: Option<String>,
+    status: String,
+    start_time: String,
+    end_time: String,
+    capital: f64,
+    max_positions: i64,
+    max_position: i64,
+    interval_hours: i64,
+    kelly_fraction: f64,
+    max_position_pct: f64,
+    take_profit: f64,
+    stop_loss: f64,
+    max_hold_hours: i64,
+    data_source: String,
+    total_return: Option<f64>,
+    total_return_pct: Option<f64>,
+    sharpe_ratio: Option<f64>,
+    max_drawdown_pct: Option<f64>,
+    win_rate: Option<f64>,
+    total_trades: Option<i64>,
+    result_json: Option<String>,
+    error: Option<String>,
+}
+
+/// A durable backtest run record.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BacktestRunRecord {
+    pub id: i64,
+    pub run_id: String,
+    pub started_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub status: String,
+    pub start_time: DateTime<Utc>,
+    pub end_time: DateTime<Utc>,
+    pub capital: f64,
+    pub max_positions: usize,
+    pub max_position: u64,
+    pub interval_hours: i64,
+    pub kelly_fraction: f64,
+    pub max_position_pct: f64,
+    pub take_profit: f64,
+    pub stop_loss: f64,
+    pub max_hold_hours: i64,
+    pub data_source: String,
+    pub total_return: Option<f64>,
+    pub total_return_pct: Option<f64>,
+    pub sharpe_ratio: Option<f64>,
+    pub max_drawdown_pct: Option<f64>,
+    pub win_rate: Option<f64>,
+    pub total_trades: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<serde_json::Value>,
+    pub error: Option<String>,
+}
+
+impl TryFrom<BacktestRunRow> for BacktestRunRecord {
+    type Error = anyhow::Error;
+
+    fn try_from(row: BacktestRunRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: row.id,
+            run_id: row.run_id,
+            started_at: row.started_at.parse::<DateTime<Utc>>()?,
+            completed_at: row
+                .completed_at
+                .as_deref()
+                .map(str::parse::<DateTime<Utc>>)
+                .transpose()?,
+            status: row.status,
+            start_time: row.start_time.parse::<DateTime<Utc>>()?,
+            end_time: row.end_time.parse::<DateTime<Utc>>()?,
+            capital: row.capital,
+            max_positions: row.max_positions as usize,
+            max_position: row.max_position as u64,
+            interval_hours: row.interval_hours,
+            kelly_fraction: row.kelly_fraction,
+            max_position_pct: row.max_position_pct,
+            take_profit: row.take_profit,
+            stop_loss: row.stop_loss,
+            max_hold_hours: row.max_hold_hours,
+            data_source: row.data_source,
+            total_return: row.total_return,
+            total_return_pct: row.total_return_pct,
+            sharpe_ratio: row.sharpe_ratio,
+            max_drawdown_pct: row.max_drawdown_pct,
+            win_rate: row.win_rate,
+            total_trades: row.total_trades,
+            result: row
+                .result_json
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()?,
+            error: row.error,
+        })
+    }
+}
+
 /// A cached market entry
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MarketCacheEntry {
@@ -1024,4 +1390,81 @@ pub struct HistoricalTradeRow {
     pub price: String,
     pub volume: i64,
     pub taker_side: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use tempfile::NamedTempFile;
+
+    #[tokio::test]
+    async fn persists_backtest_run_lifecycle() {
+        let file = NamedTempFile::new().expect("temp db");
+        let store = SqliteStore::new(file.path().to_str().expect("utf8 path"))
+            .await
+            .expect("store opens");
+
+        let started_at = Utc::now();
+        let run = NewBacktestRun {
+            run_id: "run-test-1".to_string(),
+            started_at,
+            start_time: started_at,
+            end_time: started_at + chrono::TimeDelta::hours(24),
+            capital: 10_000.0,
+            max_positions: 25,
+            max_position: 100,
+            interval_hours: 1,
+            kelly_fraction: 0.4,
+            max_position_pct: 0.1,
+            take_profit: 0.5,
+            stop_loss: 0.99,
+            max_hold_hours: 48,
+            data_source: "sqlite".to_string(),
+        };
+
+        let id = store
+            .record_backtest_run_started(&run)
+            .await
+            .expect("run start records");
+        assert_eq!(id, 1);
+
+        let running = store
+            .get_backtest_run("run-test-1")
+            .await
+            .expect("run fetch works")
+            .expect("run exists");
+        assert_eq!(running.status, "running");
+        assert_eq!(running.run_id, "run-test-1");
+        assert_eq!(running.max_positions, 25);
+
+        let result = json!({
+            "total_return": 123.45,
+            "total_return_pct": 1.23,
+            "sharpe_ratio": 2.5,
+            "max_drawdown_pct": 0.4,
+            "win_rate": 55.0,
+            "total_trades": 42
+        });
+        store
+            .complete_backtest_run("run-test-1", &result)
+            .await
+            .expect("run completes");
+
+        let completed = store
+            .get_backtest_run("1")
+            .await
+            .expect("run fetch by id works")
+            .expect("run exists by id");
+        assert_eq!(completed.status, "complete");
+        assert_eq!(completed.total_return, Some(123.45));
+        assert_eq!(completed.total_trades, Some(42));
+        assert_eq!(completed.result.as_ref(), Some(&result));
+
+        let recent = store
+            .get_recent_backtest_runs(10)
+            .await
+            .expect("recent runs fetch");
+        assert_eq!(recent.len(), 1);
+    }
 }

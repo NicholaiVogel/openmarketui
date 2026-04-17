@@ -3,14 +3,15 @@
 use super::{AppState, BacktestRunStatus, SessionConfig, SessionMode};
 use crate::backtest::Backtester;
 use crate::data::HistoricalData;
-use axum::extract::State;
-use axum::http::StatusCode;
 use axum::Json;
+use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
 use chrono::Utc;
 use pm_core::{BacktestConfig, ExitConfig};
 use pm_engine::PositionSizingConfig;
-use rust_decimal::prelude::ToPrimitive;
+use pm_store::{AuditEvent, BacktestRunRecord, DecisionRecord, NewAuditEvent, NewBacktestRun};
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::{error, info};
@@ -47,6 +48,27 @@ pub struct PositionResponse {
     pub unrealized_pnl: f64,
     pub pnl_pct: f64,
     pub hours_held: i64,
+}
+
+#[derive(Serialize)]
+pub struct PositionCloseResponse {
+    pub ticker: String,
+    pub side: String,
+    pub quantity_requested: u64,
+    pub quantity_filled: u64,
+    pub fill_price: f64,
+    pub fee: Option<f64>,
+    pub pnl: Option<f64>,
+    pub cash_after: f64,
+    pub remaining_quantity: u64,
+    pub closed: bool,
+    pub timestamp: String,
+    pub price_source: String,
+}
+
+#[derive(Serialize)]
+pub struct PositionCloseErrorResponse {
+    pub error: String,
 }
 
 #[derive(Serialize)]
@@ -92,6 +114,20 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<StatusRespon
         last_tick: status.last_tick.map(|t| t.to_rfc3339()),
         ticks_completed: status.ticks_completed,
     })
+}
+
+pub async fn get_snapshot(State(state): State<Arc<AppState>>) -> Json<super::ws::ServerMessage> {
+    Json(super::ws::build_snapshot(&state).await)
+}
+
+pub async fn post_daemon_shutdown(State(state): State<Arc<AppState>>) -> StatusCode {
+    match state.shutdown_tx.send(()) {
+        Ok(_) => StatusCode::ACCEPTED,
+        Err(e) => {
+            error!(error = %e, "failed to send daemon shutdown signal");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
 }
 
 pub async fn get_portfolio(State(state): State<Arc<AppState>>) -> Json<PortfolioResponse> {
@@ -187,6 +223,40 @@ pub async fn get_positions(State(state): State<Arc<AppState>>) -> Json<Vec<Posit
         .collect();
 
     Json(positions)
+}
+
+pub async fn post_position_close(
+    State(state): State<Arc<AppState>>,
+    Path(ticker): Path<String>,
+) -> Result<Json<PositionCloseResponse>, (StatusCode, Json<PositionCloseErrorResponse>)> {
+    match state.engine.close_position(&ticker).await {
+        Ok(Some(result)) => Ok(Json(PositionCloseResponse {
+            ticker: result.ticker,
+            side: format!("{:?}", result.side),
+            quantity_requested: result.quantity_requested,
+            quantity_filled: result.quantity_filled,
+            fill_price: result.fill_price.to_f64().unwrap_or(0.0),
+            fee: result.fee.and_then(|fee| fee.to_f64()),
+            pnl: result.pnl.and_then(|pnl| pnl.to_f64()),
+            cash_after: result.cash_after.to_f64().unwrap_or(0.0),
+            remaining_quantity: result.remaining_quantity,
+            closed: result.closed,
+            timestamp: result.timestamp.to_rfc3339(),
+            price_source: result.price_source,
+        })),
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            Json(PositionCloseErrorResponse {
+                error: format!("position not found: {ticker}"),
+            }),
+        )),
+        Err(err) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(PositionCloseErrorResponse {
+                error: err.to_string(),
+            }),
+        )),
+    }
 }
 
 pub async fn get_trades(State(state): State<Arc<AppState>>) -> Json<Vec<TradeResponse>> {
@@ -286,6 +356,7 @@ pub struct BacktestRequest {
 #[derive(Serialize)]
 pub struct BacktestStatusResponse {
     pub status: String,
+    pub run_id: Option<String>,
     pub elapsed_secs: Option<u64>,
     pub error: Option<String>,
     pub phase: Option<String>,
@@ -310,6 +381,32 @@ pub struct BacktestLiveSnapshotResponse {
 #[derive(Serialize)]
 pub struct BacktestErrorResponse {
     pub error: String,
+}
+
+async fn mark_backtest_failed(
+    store: &Arc<pm_store::SqliteStore>,
+    backtest_state: &Arc<tokio::sync::Mutex<super::BacktestState>>,
+    session_state: &Arc<tokio::sync::RwLock<super::SessionState>>,
+    run_id: &str,
+    message: String,
+) {
+    {
+        let mut guard = backtest_state.lock().await;
+        guard.status = BacktestRunStatus::Failed;
+        guard.error = Some(message.clone());
+    }
+
+    if let Err(e) = store
+        .finish_backtest_run_with_error(run_id, "failed", &message)
+        .await
+    {
+        error!(run_id = %run_id, error = %e, "failed to persist failed backtest run");
+    }
+
+    let mut session = session_state.write().await;
+    if session.mode == SessionMode::Backtest {
+        *session = super::SessionState::default();
+    }
 }
 
 pub async fn post_backtest_run(
@@ -345,29 +442,6 @@ pub async fn post_backtest_run(
         )
     })?;
 
-    info!(
-        start = %start_time,
-        end = %end_time,
-        "starting backtest from web UI"
-    );
-
-    let progress = Arc::new(super::BacktestProgress::new(0));
-
-    {
-        let mut guard = state.backtest.lock().await;
-        guard.status = BacktestRunStatus::Running {
-            started_at: Utc::now(),
-        };
-        guard.progress = Some(progress.clone());
-        guard.result = None;
-        guard.error = None;
-        guard.live_snapshot = None;
-    }
-
-    let backtest_state = state.backtest.clone();
-    let session_state = state.session.clone();
-    let progress = progress.clone();
-
     let capital = req.capital.unwrap_or(10000.0);
     let max_positions = req.max_positions.unwrap_or(100);
     let max_position = req.max_position.unwrap_or(100);
@@ -379,9 +453,65 @@ pub async fn post_backtest_run(
     let max_hold_hours = req.max_hold_hours.unwrap_or(48);
 
     let historical_store = state.historical_store.clone();
+    let run_store = state.store.clone();
     let parquet_data_dir = state.parquet_data_dir.clone();
-    let use_parquet = req.data_source.as_deref() == Some("parquet")
-        || parquet_data_dir.is_some();
+    let use_parquet = req.data_source.as_deref() == Some("parquet") || parquet_data_dir.is_some();
+    let data_source = if use_parquet { "parquet" } else { "sqlite" }.to_string();
+    let run_id = uuid::Uuid::new_v4().to_string();
+    let started_at = Utc::now();
+
+    run_store
+        .record_backtest_run_started(&NewBacktestRun {
+            run_id: run_id.clone(),
+            started_at: started_at.clone(),
+            start_time: start_time.clone(),
+            end_time: end_time.clone(),
+            capital,
+            max_positions,
+            max_position,
+            interval_hours,
+            kelly_fraction,
+            max_position_pct,
+            take_profit,
+            stop_loss,
+            max_hold_hours,
+            data_source: data_source.clone(),
+        })
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to persist backtest run start");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BacktestErrorResponse {
+                    error: "failed to persist backtest run".into(),
+                }),
+            )
+        })?;
+
+    info!(
+        run_id = %run_id,
+        start = %start_time,
+        end = %end_time,
+        data_source = %data_source,
+        "starting backtest from web UI"
+    );
+
+    let progress = Arc::new(super::BacktestProgress::new(0));
+
+    {
+        let mut guard = state.backtest.lock().await;
+        guard.status = BacktestRunStatus::Running { started_at };
+        guard.run_id = Some(run_id.clone());
+        guard.progress = Some(progress.clone());
+        guard.result = None;
+        guard.error = None;
+        guard.live_snapshot = None;
+    }
+
+    let backtest_state = state.backtest.clone();
+    let session_state = state.session.clone();
+    let progress = progress.clone();
+    let run_id_for_task = run_id.clone();
 
     tokio::spawn(async move {
         let data = if use_parquet {
@@ -390,27 +520,28 @@ pub async fn post_backtest_run(
                 match crate::data::load_parquet(parquet_dir, Some((start_time, end_time))) {
                     Ok(d) => Arc::new(d),
                     Err(e) => {
-                        let mut guard = backtest_state.lock().await;
-                        guard.status = BacktestRunStatus::Failed;
-                        guard.error = Some(format!("failed to load parquet data: {}", e));
+                        let message = format!("failed to load parquet data: {}", e);
                         error!(error = %e, "backtest parquet load failed");
-
-                        let mut session = session_state.write().await;
-                        if session.mode == SessionMode::Backtest {
-                            *session = super::SessionState::default();
-                        }
+                        mark_backtest_failed(
+                            &run_store,
+                            &backtest_state,
+                            &session_state,
+                            &run_id_for_task,
+                            message,
+                        )
+                        .await;
                         return;
                     }
                 }
             } else {
-                let mut guard = backtest_state.lock().await;
-                guard.status = BacktestRunStatus::Failed;
-                guard.error = Some("parquet data source requested but no parquet_data_dir configured".into());
-
-                let mut session = session_state.write().await;
-                if session.mode == SessionMode::Backtest {
-                    *session = super::SessionState::default();
-                }
+                mark_backtest_failed(
+                    &run_store,
+                    &backtest_state,
+                    &session_state,
+                    &run_id_for_task,
+                    "parquet data source requested but no parquet_data_dir configured".into(),
+                )
+                .await;
                 return;
             }
         } else {
@@ -418,15 +549,16 @@ pub async fn post_backtest_run(
             match HistoricalData::load_sqlite(&historical_store, start_time, end_time).await {
                 Ok(d) => Arc::new(d),
                 Err(e) => {
-                    let mut guard = backtest_state.lock().await;
-                    guard.status = BacktestRunStatus::Failed;
-                    guard.error = Some(format!("failed to load data from sqlite: {}", e));
+                    let message = format!("failed to load data from sqlite: {}", e);
                     error!(error = %e, "backtest sqlite load failed");
-
-                    let mut session = session_state.write().await;
-                    if session.mode == SessionMode::Backtest {
-                        *session = super::SessionState::default();
-                    }
+                    mark_backtest_failed(
+                        &run_store,
+                        &backtest_state,
+                        &session_state,
+                        &run_id_for_task,
+                        message,
+                    )
+                    .await;
                     return;
                 }
             }
@@ -464,6 +596,20 @@ pub async fn post_backtest_run(
                 }
             });
         let result = backtester.run().await;
+        let result_json = match serde_json::to_value(&result) {
+            Ok(value) => value,
+            Err(e) => {
+                error!(run_id = %run_id_for_task, error = %e, "failed to serialize backtest result");
+                serde_json::Value::Null
+            }
+        };
+
+        if let Err(e) = run_store
+            .complete_backtest_run(&run_id_for_task, &result_json)
+            .await
+        {
+            error!(run_id = %run_id_for_task, error = %e, "failed to persist completed backtest run");
+        }
 
         let mut guard = backtest_state.lock().await;
         guard.status = BacktestRunStatus::Complete;
@@ -529,6 +675,7 @@ pub async fn get_backtest_status(
 
     Json(BacktestStatusResponse {
         status: status_str,
+        run_id: guard.run_id.clone(),
         elapsed_secs: elapsed,
         error,
         phase,
@@ -549,15 +696,70 @@ pub async fn get_backtest_result(
     }
 }
 
+#[derive(Deserialize)]
+pub struct BacktestRunsQuery {
+    #[serde(default = "default_backtest_runs_limit")]
+    pub limit: u32,
+}
+
+fn default_backtest_runs_limit() -> u32 {
+    25
+}
+
+pub async fn get_backtest_runs(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<BacktestRunsQuery>,
+) -> Result<Json<Vec<BacktestRunRecord>>, StatusCode> {
+    match state.store.get_recent_backtest_runs(query.limit).await {
+        Ok(mut runs) => {
+            for run in &mut runs {
+                run.result = None;
+            }
+            Ok(Json(runs))
+        }
+        Err(e) => {
+            error!(error = %e, "failed to get backtest runs");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+pub async fn get_backtest_run(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<BacktestRunRecord>, StatusCode> {
+    match state.store.get_backtest_run(&id).await {
+        Ok(Some(run)) => Ok(Json(run)),
+        Ok(None) => Err(StatusCode::NOT_FOUND),
+        Err(e) => {
+            error!(id = %id, error = %e, "failed to get backtest run");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
 pub async fn post_backtest_stop(State(state): State<Arc<AppState>>) -> StatusCode {
-    {
+    let stopped_run_id = {
         let mut guard = state.backtest.lock().await;
+        let was_running = matches!(guard.status, BacktestRunStatus::Running { .. });
+        let run_id = guard.run_id.take();
         // Reset backtest state
         guard.status = BacktestRunStatus::Idle;
         guard.error = None;
         guard.progress = None;
         guard.live_snapshot = None;
-        // Keep result if there was one
+        // Keep result if there was one. Only a running job should rewrite durable history as stopped.
+        if was_running { run_id } else { None }
+    };
+
+    if let Some(run_id) = stopped_run_id {
+        if let Err(e) = state
+            .store
+            .finish_backtest_run_with_error(&run_id, "stopped", "backtest stopped/reset via API")
+            .await
+        {
+            error!(run_id = %run_id, error = %e, "failed to persist stopped backtest run");
+        }
     }
 
     // Also reset session state
@@ -901,7 +1103,7 @@ fn default_limit() -> usize {
 
 pub async fn get_markets(
     State(state): State<Arc<AppState>>,
-    axum::extract::Query(query): axum::extract::Query<MarketsQuery>,
+    Query(query): Query<MarketsQuery>,
 ) -> Json<Vec<MarketResponse>> {
     let candidates = state.engine.get_last_candidates().await;
     let ctx = state.engine.get_context().await;
@@ -929,4 +1131,104 @@ pub async fn get_markets(
         .collect();
 
     Json(markets)
+}
+
+#[derive(Deserialize)]
+pub struct DecisionsQuery {
+    #[serde(default = "default_decision_limit")]
+    pub limit: u32,
+}
+
+fn default_decision_limit() -> u32 {
+    100
+}
+
+pub async fn get_decisions(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<DecisionsQuery>,
+) -> Result<Json<Vec<DecisionRecord>>, StatusCode> {
+    state
+        .store
+        .get_recent_decisions(query.limit)
+        .await
+        .map(Json)
+        .map_err(|e| {
+            error!(error = %e, "failed to get recent decisions");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
+}
+
+pub async fn get_decision(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> Result<Json<DecisionRecord>, StatusCode> {
+    match state.store.get_decision(id).await {
+        Ok(Some(decision)) => Ok(Json(decision)),
+        Ok(None) => Err(StatusCode::NOT_FOUND),
+        Err(e) => {
+            error!(id, error = %e, "failed to get decision");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+pub async fn get_market_decisions(
+    State(state): State<Arc<AppState>>,
+    Path(ticker): Path<String>,
+    Query(query): Query<DecisionsQuery>,
+) -> Result<Json<Vec<DecisionRecord>>, StatusCode> {
+    state
+        .store
+        .get_decisions_for_ticker(&ticker, query.limit)
+        .await
+        .map(Json)
+        .map_err(|e| {
+            error!(ticker = %ticker, error = %e, "failed to get decisions for ticker");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
+}
+
+#[derive(Deserialize)]
+pub struct AuditQuery {
+    #[serde(default = "default_audit_limit")]
+    pub limit: u32,
+}
+
+fn default_audit_limit() -> u32 {
+    100
+}
+
+#[derive(Serialize)]
+pub struct AuditEventCreated {
+    pub id: i64,
+}
+
+pub async fn get_audit_events(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<AuditQuery>,
+) -> Result<Json<Vec<AuditEvent>>, StatusCode> {
+    state
+        .store
+        .get_recent_audit_events(query.limit)
+        .await
+        .map(Json)
+        .map_err(|e| {
+            error!(error = %e, "failed to get audit events");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
+}
+
+pub async fn post_audit_event(
+    State(state): State<Arc<AppState>>,
+    Json(event): Json<NewAuditEvent>,
+) -> Result<Json<AuditEventCreated>, StatusCode> {
+    state
+        .store
+        .record_audit_event(&event)
+        .await
+        .map(|id| Json(AuditEventCreated { id }))
+        .map_err(|e| {
+            error!(error = %e, "failed to record audit event");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
 }

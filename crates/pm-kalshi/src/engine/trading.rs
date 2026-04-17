@@ -7,7 +7,7 @@ use crate::pipeline::TradingPipeline;
 use crate::sources::{LiveKalshiSource, PaperExecutor};
 use chrono::Utc;
 use pm_core::{
-    Filter, OrderExecutor, Portfolio, Scorer, Selector, Trade, TradeType, TradingContext,
+    Filter, OrderExecutor, Portfolio, Scorer, Selector, Side, Trade, TradeType, TradingContext,
 };
 use pm_engine::{CbCheckContext, CbStatus, CircuitBreakerState};
 use pm_garden::{
@@ -18,6 +18,7 @@ use pm_garden::{
 use pm_store::SqliteStore;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
@@ -52,6 +53,30 @@ pub struct TickMetrics {
     pub fills_executed: usize,
     pub duration_ms: u64,
     pub decisions: Vec<DecisionInfo>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PipelineFilterInfo {
+    pub name: String,
+    pub filter_type: String,
+    pub enabled: bool,
+    pub config: Value,
+}
+
+#[derive(Debug, Clone)]
+pub struct ManualCloseResult {
+    pub ticker: String,
+    pub side: Side,
+    pub quantity_requested: u64,
+    pub quantity_filled: u64,
+    pub fill_price: Decimal,
+    pub fee: Option<Decimal>,
+    pub pnl: Option<Decimal>,
+    pub cash_after: Decimal,
+    pub remaining_quantity: u64,
+    pub closed: bool,
+    pub timestamp: chrono::DateTime<Utc>,
+    pub price_source: String,
 }
 
 pub struct PaperTradingEngine {
@@ -175,6 +200,124 @@ impl PaperTradingEngine {
 
     pub async fn get_last_candidates(&self) -> Vec<pm_core::MarketCandidate> {
         self.last_candidates.read().await.clone()
+    }
+
+    pub async fn close_position(&self, ticker: &str) -> anyhow::Result<Option<ManualCloseResult>> {
+        let now = Utc::now();
+        let current_prices = self.get_current_prices().await;
+
+        let position = {
+            let ctx = self.context.read().await;
+            ctx.portfolio.positions.get(ticker).cloned()
+        };
+        let Some(position) = position else {
+            return Ok(None);
+        };
+
+        let (fallback_yes_price, price_source) =
+            if let Some(current_yes_price) = current_prices.get(ticker).copied() {
+                (current_yes_price, "market_state".to_string())
+            } else {
+                let yes_price = match position.side {
+                    Side::Yes => position.avg_entry_price,
+                    Side::No => Decimal::ONE - position.avg_entry_price,
+                };
+                (yes_price, "entry_price_fallback".to_string())
+            };
+
+        let Some(exit_fill) = self
+            .executor
+            .execute_exit_fill(
+                ticker,
+                position.side,
+                position.quantity,
+                now,
+                Some(fallback_yes_price),
+            )
+            .await
+        else {
+            anyhow::bail!("manual close was not filled");
+        };
+
+        let mut ctx = self.context.write().await;
+        if !ctx.portfolio.positions.contains_key(ticker) {
+            return Ok(None);
+        }
+
+        let pnl = ctx.portfolio.close_position_partial(
+            ticker,
+            exit_fill.quantity,
+            exit_fill.price,
+            exit_fill.fee,
+        );
+        let remaining_quantity = ctx
+            .portfolio
+            .positions
+            .get(ticker)
+            .map(|position| position.quantity)
+            .unwrap_or(0);
+
+        ctx.trading_history.push(Trade {
+            ticker: ticker.to_string(),
+            side: position.side,
+            quantity: exit_fill.quantity,
+            price: exit_fill.price,
+            timestamp: exit_fill.timestamp,
+            trade_type: TradeType::Close,
+        });
+
+        self.store
+            .record_fill(&exit_fill, pnl, Some("manual_close"))
+            .await?;
+        self.store.save_portfolio(&ctx.portfolio).await?;
+
+        Ok(Some(ManualCloseResult {
+            ticker: ticker.to_string(),
+            side: position.side,
+            quantity_requested: position.quantity,
+            quantity_filled: exit_fill.quantity,
+            fill_price: exit_fill.price,
+            fee: exit_fill.fee,
+            pnl,
+            cash_after: ctx.portfolio.cash,
+            remaining_quantity,
+            closed: remaining_quantity == 0,
+            timestamp: exit_fill.timestamp,
+            price_source,
+        }))
+    }
+
+    pub fn get_filter_registry(&self) -> Vec<PipelineFilterInfo> {
+        let max_position_per_market =
+            (self.config.trading.initial_capital * self.config.trading.max_position_pct) as u64;
+
+        vec![
+            PipelineFilterInfo {
+                name: "time_to_close".to_string(),
+                filter_type: "TimeToCloseFilter".to_string(),
+                enabled: true,
+                config: json!({
+                    "min_hours": self.config.trading.min_time_to_close_hours,
+                    "max_hours": self.config.trading.max_time_to_close_hours,
+                }),
+            },
+            PipelineFilterInfo {
+                name: "liquidity".to_string(),
+                filter_type: "LiquidityFilter".to_string(),
+                enabled: true,
+                config: json!({
+                    "min_volume_24h": self.config.paper_execution.min_trade_volume_24h,
+                }),
+            },
+            PipelineFilterInfo {
+                name: "already_positioned".to_string(),
+                filter_type: "AlreadyPositionedFilter".to_string(),
+                enabled: true,
+                config: json!({
+                    "max_position_per_market": max_position_per_market.max(100),
+                }),
+            },
+        ]
     }
 
     pub async fn pause(&self, reason: String) {

@@ -360,6 +360,7 @@ async fn run_paper(config_path: PathBuf) -> Result<()> {
             shutdown_tx: shutdown_tx.clone(),
             backtest: Arc::new(tokio::sync::Mutex::new(web::BacktestState {
                 status: web::BacktestRunStatus::Idle,
+                run_id: None,
                 progress: None,
                 result: None,
                 error: None,

@@ -395,7 +395,7 @@ async fn get_session_info(state: &Arc<AppState>) -> SessionInfo {
     }
 }
 
-async fn build_snapshot(state: &Arc<AppState>) -> ServerMessage {
+pub async fn build_snapshot(state: &Arc<AppState>) -> ServerMessage {
     let session_info = get_session_info(state).await;
     let engine_status = state.engine.get_status().await;
     let ctx = state.engine.get_context().await;
