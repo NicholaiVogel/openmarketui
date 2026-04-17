@@ -266,17 +266,20 @@ impl PaperExecutor {
             return None;
         }
 
-        let snapshot = {
+        let (snapshot, used_fallback_snapshot) = {
             let state = self.market_state.read().await;
             if let Some(snap) = state.get(ticker) {
-                snap.clone()
+                (snap.clone(), false)
             } else {
-                MarketSnapshot {
-                    yes_mid: fallback_yes_price?,
-                    volume_24h: 0,
-                    yes_spread_bps: None,
-                    no_spread_bps: None,
-                }
+                (
+                    MarketSnapshot {
+                        yes_mid: fallback_yes_price?,
+                        volume_24h: requested_qty.saturating_mul(100).max(1),
+                        yes_spread_bps: None,
+                        no_spread_bps: None,
+                    },
+                    true,
+                )
             }
         };
 
@@ -311,7 +314,11 @@ impl PaperExecutor {
             }
         }
 
-        let mut quantity = self.partial_fill_qty(execution_request_qty, snapshot.volume_24h);
+        let mut quantity = if !is_buy && used_fallback_snapshot {
+            execution_request_qty
+        } else {
+            self.partial_fill_qty(execution_request_qty, snapshot.volume_24h)
+        };
         if quantity == 0 {
             return None;
         }

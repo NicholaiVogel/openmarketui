@@ -491,9 +491,12 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
           cash: final.cash,
           equity: final.equity,
           initialCapital: initial,
+          positionsValue: final.positions_value,
           returnPct: ((final.equity - initial) / initial) * 100,
+          totalReturnPct: ((final.equity - initial) / initial) * 100,
           drawdownPct: result.maxDrawdownPct,
           positionsCount: 0, // backtest ends with all positions closed
+          positionCount: 0,
           realizedPnl: final.equity - initial,
           unrealizedPnl: 0,
           totalPnl: final.equity - initial,

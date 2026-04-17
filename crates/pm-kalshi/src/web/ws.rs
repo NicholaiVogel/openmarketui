@@ -9,7 +9,9 @@ use axum::{
     response::IntoResponse,
 };
 use futures::{SinkExt, StreamExt};
+use pm_core::{Side, TradingContext};
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -99,16 +101,25 @@ pub struct EngineSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct AccountSnapshot {
+    pub portfolio: PortfolioSnapshot,
+    pub positions: Vec<PositionSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct PortfolioSnapshot {
     pub cash: f64,
     pub equity: f64,
     pub initial_capital: f64,
-    pub return_pct: f64,
-    pub drawdown_pct: f64,
-    pub positions_count: usize,
+    pub positions_value: f64,
     pub realized_pnl: f64,
     pub unrealized_pnl: f64,
     pub total_pnl: f64,
+    pub return_pct: f64,
+    pub total_return_pct: f64,
+    pub drawdown_pct: f64,
+    pub positions_count: usize,
+    pub position_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -119,10 +130,15 @@ pub struct PositionSnapshot {
     pub side: String,
     pub quantity: u64,
     pub entry_price: f64,
+    pub avg_entry_price: f64,
     pub current_price: Option<f64>,
+    pub cost_basis: f64,
+    pub market_value: f64,
     pub entry_time: String,
+    pub close_time: Option<String>,
     pub unrealized_pnl: f64,
     pub pnl_pct: f64,
+    pub unrealized_pnl_pct: f64,
     pub hours_held: i64,
 }
 
@@ -395,12 +411,120 @@ async fn get_session_info(state: &Arc<AppState>) -> SessionInfo {
     }
 }
 
-async fn build_snapshot(state: &Arc<AppState>) -> ServerMessage {
-    let session_info = get_session_info(state).await;
-    let engine_status = state.engine.get_status().await;
+pub async fn build_account_snapshot(state: &Arc<AppState>) -> AccountSnapshot {
     let ctx = state.engine.get_context().await;
     let current_prices = state.engine.get_current_prices().await;
-    let now = chrono::Utc::now();
+    let peak_equity = state
+        .store
+        .get_peak_equity()
+        .await
+        .ok()
+        .flatten()
+        .and_then(|p| p.to_f64());
+
+    build_account_snapshot_from_context(&ctx, &current_prices, peak_equity, chrono::Utc::now())
+}
+
+fn build_account_snapshot_from_context(
+    ctx: &TradingContext,
+    current_yes_prices: &std::collections::HashMap<String, Decimal>,
+    peak_equity: Option<f64>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> AccountSnapshot {
+    let mut positions: Vec<PositionSnapshot> = ctx
+        .portfolio
+        .positions
+        .values()
+        .map(|position| {
+            let avg_entry_price = position.avg_entry_price.to_f64().unwrap_or(0.0);
+            let quantity = position.quantity as f64;
+            let cost_basis = avg_entry_price * quantity;
+            let current_price = current_yes_prices
+                .get(&position.ticker)
+                .and_then(|price| price.to_f64())
+                .map(|yes_price| held_side_price(position.side, yes_price));
+            let mark_price = current_price.unwrap_or(avg_entry_price);
+            let market_value = mark_price * quantity;
+            let unrealized_pnl = market_value - cost_basis;
+            let unrealized_pnl_pct = if cost_basis > 0.0 {
+                unrealized_pnl / cost_basis * 100.0
+            } else {
+                0.0
+            };
+
+            PositionSnapshot {
+                ticker: position.ticker.clone(),
+                title: position.title.clone(),
+                category: position.category.clone(),
+                side: format!("{:?}", position.side),
+                quantity: position.quantity,
+                entry_price: avg_entry_price,
+                avg_entry_price,
+                current_price,
+                cost_basis,
+                market_value,
+                entry_time: position.entry_time.to_rfc3339(),
+                close_time: position.close_time.map(|time| time.to_rfc3339()),
+                unrealized_pnl,
+                pnl_pct: unrealized_pnl_pct,
+                unrealized_pnl_pct,
+                hours_held: (now - position.entry_time).num_hours(),
+            }
+        })
+        .collect();
+
+    positions.sort_by(|a, b| a.ticker.cmp(&b.ticker));
+
+    let cash = ctx.portfolio.cash.to_f64().unwrap_or(0.0);
+    let positions_value: f64 = positions.iter().map(|position| position.market_value).sum();
+    let equity = cash + positions_value;
+    let initial_capital = ctx.portfolio.initial_capital.to_f64().unwrap_or(10000.0);
+    let total_return_pct = if initial_capital > 0.0 {
+        (equity - initial_capital) / initial_capital * 100.0
+    } else {
+        0.0
+    };
+    let drawdown_pct = peak_equity
+        .filter(|peak| *peak > 0.0)
+        .map(|peak| ((peak - equity) / peak * 100.0).max(0.0))
+        .unwrap_or(0.0);
+    let realized_pnl = ctx.portfolio.realized_pnl.to_f64().unwrap_or(0.0);
+    let unrealized_pnl: f64 = positions
+        .iter()
+        .map(|position| position.unrealized_pnl)
+        .sum();
+    let total_pnl = realized_pnl + unrealized_pnl;
+    let position_count = positions.len();
+
+    AccountSnapshot {
+        portfolio: PortfolioSnapshot {
+            cash,
+            equity,
+            initial_capital,
+            positions_value,
+            realized_pnl,
+            unrealized_pnl,
+            total_pnl,
+            return_pct: total_return_pct,
+            total_return_pct,
+            drawdown_pct,
+            positions_count: position_count,
+            position_count,
+        },
+        positions,
+    }
+}
+
+fn held_side_price(side: Side, yes_price: f64) -> f64 {
+    match side {
+        Side::Yes => yes_price,
+        Side::No => 1.0 - yes_price,
+    }
+}
+
+pub async fn build_snapshot(state: &Arc<AppState>) -> ServerMessage {
+    let session_info = get_session_info(state).await;
+    let engine_status = state.engine.get_status().await;
 
     let engine = EngineSnapshot {
         state: format!("{}", engine_status.state),
@@ -409,112 +533,9 @@ async fn build_snapshot(state: &Arc<AppState>) -> ServerMessage {
         ticks_completed: engine_status.ticks_completed,
     };
 
-    let positions_value: f64 = ctx
-        .portfolio
-        .positions
-        .values()
-        .map(|p| p.avg_entry_price.to_f64().unwrap_or(0.0) * p.quantity as f64)
-        .sum();
-
-    let cash = ctx.portfolio.cash.to_f64().unwrap_or(0.0);
-    let equity = cash + positions_value;
-    let initial = ctx.portfolio.initial_capital.to_f64().unwrap_or(10000.0);
-    let return_pct = if initial > 0.0 {
-        (equity - initial) / initial * 100.0
-    } else {
-        0.0
-    };
-
-    let peak = state
-        .store
-        .get_peak_equity()
-        .await
-        .ok()
-        .flatten()
-        .and_then(|p| p.to_f64())
-        .unwrap_or(equity);
-
-    let drawdown_pct = if peak > 0.0 {
-        ((peak - equity) / peak * 100.0).max(0.0)
-    } else {
-        0.0
-    };
-
-    let unrealized_pnl: f64 = ctx
-        .portfolio
-        .positions
-        .values()
-        .map(|p| {
-            let entry = p.avg_entry_price.to_f64().unwrap_or(0.0);
-            let current = current_prices.get(&p.ticker).and_then(|d| d.to_f64());
-            if let Some(curr) = current {
-                let effective_curr = match p.side {
-                    pm_core::Side::Yes => curr,
-                    pm_core::Side::No => 1.0 - curr,
-                };
-                (effective_curr - entry) * p.quantity as f64
-            } else {
-                0.0
-            }
-        })
-        .sum();
-
-    let realized_pnl = ctx.portfolio.realized_pnl.to_f64().unwrap_or(0.0);
-    let total_pnl = realized_pnl + unrealized_pnl;
-
-    let portfolio = PortfolioSnapshot {
-        cash,
-        equity,
-        initial_capital: initial,
-        return_pct,
-        drawdown_pct,
-        positions_count: ctx.portfolio.positions.len(),
-        realized_pnl,
-        unrealized_pnl,
-        total_pnl,
-    };
-
-    let positions: Vec<PositionSnapshot> = ctx
-        .portfolio
-        .positions
-        .values()
-        .map(|p| {
-            let entry = p.avg_entry_price.to_f64().unwrap_or(0.0);
-            let current = current_prices.get(&p.ticker).and_then(|d| d.to_f64());
-
-            let (unrealized_pnl, pnl_pct) = if let Some(curr) = current {
-                let effective_curr = match p.side {
-                    pm_core::Side::Yes => curr,
-                    pm_core::Side::No => 1.0 - curr,
-                };
-                let pnl = (effective_curr - entry) * p.quantity as f64;
-                let pct = if entry > 0.0 {
-                    (effective_curr - entry) / entry * 100.0
-                } else {
-                    0.0
-                };
-                (pnl, pct)
-            } else {
-                (0.0, 0.0)
-            };
-
-            let hours_held = (now - p.entry_time).num_hours();
-
-            PositionSnapshot {
-                ticker: p.ticker.clone(),
-                title: p.title.clone(),
-                category: p.category.clone(),
-                side: format!("{:?}", p.side),
-                quantity: p.quantity,
-                entry_price: entry,
-                current_price: current,
-                entry_time: p.entry_time.to_rfc3339(),
-                unrealized_pnl,
-                pnl_pct,
-                hours_held,
-            }
-        })
-        .collect();
+    let account = build_account_snapshot(state).await;
+    let portfolio = account.portfolio;
+    let positions = account.positions;
 
     let fills = state.store.get_recent_fills(50).await.unwrap_or_default();
     let recent_fills: Vec<FillSnapshot> = fills
@@ -573,9 +594,9 @@ async fn build_snapshot(state: &Arc<AppState>) -> ServerMessage {
 
     let circuit_breaker = CircuitBreakerSnapshot {
         status: cb_status,
-        drawdown_pct,
+        drawdown_pct: portfolio.drawdown_pct,
         daily_loss_pct: 0.0,
-        open_positions: ctx.portfolio.positions.len(),
+        open_positions: portfolio.position_count,
         fills_last_hour: 0,
     };
 
@@ -594,8 +615,6 @@ async fn build_snapshot(state: &Arc<AppState>) -> ServerMessage {
 pub async fn build_tick_update(state: &Arc<AppState>, pipeline: PipelineMetrics) -> ServerMessage {
     let session_info = get_session_info(state).await;
     let engine_status = state.engine.get_status().await;
-    let ctx = state.engine.get_context().await;
-    let current_prices = state.engine.get_current_prices().await;
     let now = chrono::Utc::now();
 
     let engine = EngineSnapshot {
@@ -605,112 +624,13 @@ pub async fn build_tick_update(state: &Arc<AppState>, pipeline: PipelineMetrics)
         ticks_completed: engine_status.ticks_completed,
     };
 
-    let positions_value: f64 = ctx
-        .portfolio
-        .positions
-        .values()
-        .map(|p| p.avg_entry_price.to_f64().unwrap_or(0.0) * p.quantity as f64)
-        .sum();
-
-    let cash = ctx.portfolio.cash.to_f64().unwrap_or(0.0);
-    let equity = cash + positions_value;
-    let initial = ctx.portfolio.initial_capital.to_f64().unwrap_or(10000.0);
-    let return_pct = if initial > 0.0 {
-        (equity - initial) / initial * 100.0
-    } else {
-        0.0
-    };
-
-    let peak = state
-        .store
-        .get_peak_equity()
-        .await
-        .ok()
-        .flatten()
-        .and_then(|p| p.to_f64())
-        .unwrap_or(equity);
-
-    let drawdown_pct = if peak > 0.0 {
-        ((peak - equity) / peak * 100.0).max(0.0)
-    } else {
-        0.0
-    };
-
-    let unrealized_pnl: f64 = ctx
-        .portfolio
-        .positions
-        .values()
-        .map(|p| {
-            let entry = p.avg_entry_price.to_f64().unwrap_or(0.0);
-            let current = current_prices.get(&p.ticker).and_then(|d| d.to_f64());
-            if let Some(curr) = current {
-                let effective_curr = match p.side {
-                    pm_core::Side::Yes => curr,
-                    pm_core::Side::No => 1.0 - curr,
-                };
-                (effective_curr - entry) * p.quantity as f64
-            } else {
-                0.0
-            }
-        })
-        .sum();
-
-    let realized_pnl = ctx.portfolio.realized_pnl.to_f64().unwrap_or(0.0);
-    let total_pnl = realized_pnl + unrealized_pnl;
-
-    let portfolio = PortfolioSnapshot {
-        cash,
-        equity,
-        initial_capital: initial,
-        return_pct,
-        drawdown_pct,
-        positions_count: ctx.portfolio.positions.len(),
-        realized_pnl,
-        unrealized_pnl,
-        total_pnl,
-    };
-
-    let positions: Vec<PositionSnapshot> = ctx
-        .portfolio
-        .positions
-        .values()
-        .map(|p| {
-            let entry = p.avg_entry_price.to_f64().unwrap_or(0.0);
-            let current = current_prices.get(&p.ticker).and_then(|d| d.to_f64());
-
-            let (unrealized_pnl, pnl_pct) = if let Some(curr) = current {
-                let effective_curr = match p.side {
-                    pm_core::Side::Yes => curr,
-                    pm_core::Side::No => 1.0 - curr,
-                };
-                let pnl = (effective_curr - entry) * p.quantity as f64;
-                let pct = if entry > 0.0 {
-                    (effective_curr - entry) / entry * 100.0
-                } else {
-                    0.0
-                };
-                (pnl, pct)
-            } else {
-                (0.0, 0.0)
-            };
-
-            let hours_held = (now - p.entry_time).num_hours();
-
-            PositionSnapshot {
-                ticker: p.ticker.clone(),
-                title: p.title.clone(),
-                category: p.category.clone(),
-                side: format!("{:?}", p.side),
-                quantity: p.quantity,
-                entry_price: entry,
-                current_price: current,
-                entry_time: p.entry_time.to_rfc3339(),
-                unrealized_pnl,
-                pnl_pct,
-                hours_held,
-            }
-        })
-        .collect();
+    let account = build_account_snapshot(state).await;
+    let positions_value = account.portfolio.positions_value;
+    let equity = account.portfolio.equity;
+    let cash = account.portfolio.cash;
+    let drawdown_pct = account.portfolio.drawdown_pct;
+    let portfolio = account.portfolio;
+    let positions = account.positions;
 
     let fills = state.store.get_recent_fills(10).await.unwrap_or_default();
     let recent_fills: Vec<FillSnapshot> = fills

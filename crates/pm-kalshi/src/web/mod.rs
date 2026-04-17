@@ -4,10 +4,14 @@ mod garden;
 mod handlers;
 pub mod ws;
 
+use crate::backtest::BacktestLiveSnapshot;
 use crate::data::{DataFetcher, FetchState};
 use crate::engine::PaperTradingEngine;
 use crate::metrics::BacktestResult;
-use crate::backtest::BacktestLiveSnapshot;
+use axum::body::Body;
+use axum::http::{HeaderValue, Request};
+use axum::middleware::{self, Next};
+use axum::response::Response;
 use axum::routing::{get, post, put};
 use axum::Router;
 use chrono::{DateTime, Utc};
@@ -18,8 +22,45 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use tower_http::services::ServeDir;
+use tracing::Instrument;
 
 pub use ws::{PipelineMetrics, ServerMessage};
+
+pub const TRACE_ID_HEADER: &str = "x-omu-trace-id";
+
+async fn trace_middleware(mut request: Request<Body>, next: Next) -> Response {
+    let trace_id = request
+        .headers()
+        .get(TRACE_ID_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
+
+    if let Ok(value) = HeaderValue::from_str(&trace_id) {
+        request.headers_mut().insert(TRACE_ID_HEADER, value);
+    }
+
+    let method = request.method().clone();
+    let path = request.uri().path().to_string();
+    let span = tracing::info_span!(
+        "daemon_request",
+        trace_id = %trace_id,
+        method = %method,
+        path = %path
+    );
+
+    async move {
+        let mut response = next.run(request).await;
+        if let Ok(value) = HeaderValue::from_str(&trace_id) {
+            response.headers_mut().insert(TRACE_ID_HEADER, value);
+        }
+        tracing::debug!(status = %response.status(), "request complete");
+        response
+    }
+    .instrument(span)
+    .await
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -156,6 +197,7 @@ impl BacktestProgress {
 
 pub struct BacktestState {
     pub status: BacktestRunStatus,
+    pub run_id: Option<String>,
     pub progress: Option<Arc<BacktestProgress>>,
     pub result: Option<BacktestResult>,
     pub error: Option<String>,
@@ -206,19 +248,46 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/ws", get(ws::ws_handler))
         // existing REST endpoints
         .route("/api/status", get(handlers::get_status))
+        .route("/api/daemon/shutdown", post(handlers::post_daemon_shutdown))
+        .route("/api/auth/status", get(handlers::get_auth_status))
+        .route("/api/snapshot", get(handlers::get_snapshot))
         .route("/api/portfolio", get(handlers::get_portfolio))
         .route("/api/positions", get(handlers::get_positions))
+        .route(
+            "/api/positions/redeem",
+            post(handlers::post_positions_redeem),
+        )
+        .route(
+            "/api/positions/{ticker}/close",
+            post(handlers::post_position_close),
+        )
+        .route(
+            "/api/positions/{ticker}/redeem",
+            post(handlers::post_position_redeem),
+        )
         .route("/api/trades", get(handlers::get_trades))
         .route("/api/equity", get(handlers::get_equity))
         .route("/api/circuit-breaker", get(handlers::get_circuit_breaker))
         .route("/api/markets", get(handlers::get_markets))
+        .route("/api/decisions", get(handlers::get_decisions))
+        .route("/api/decisions/{id}", get(handlers::get_decision))
+        .route("/api/audit", get(handlers::get_audit_events))
+        .route("/api/audit", post(handlers::post_audit_event))
+        .route(
+            "/api/markets/{ticker}/decisions",
+            get(handlers::get_market_decisions),
+        )
         .route("/api/control/pause", post(handlers::post_pause))
         .route("/api/control/resume", post(handlers::post_resume))
         .route("/api/backtest/run", post(handlers::post_backtest_run))
         .route("/api/backtest/status", get(handlers::get_backtest_status))
         .route("/api/backtest/result", get(handlers::get_backtest_result))
+        .route("/api/backtest/runs", get(handlers::get_backtest_runs))
+        .route("/api/backtest/runs/{id}", get(handlers::get_backtest_run))
         .route("/api/backtest/stop", post(handlers::post_backtest_stop))
         // session control
+        .route("/api/sessions", get(handlers::get_sessions))
+        .route("/api/sessions/{id}", get(handlers::get_session_run))
         .route("/api/session/start", post(handlers::post_session_start))
         .route("/api/session/stop", post(handlers::post_session_stop))
         .route("/api/session/config", post(handlers::post_session_config))
@@ -232,6 +301,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/garden/status", get(garden::get_garden_status))
         .route("/api/beds", get(garden::get_beds))
         .route("/api/beds/{bed}/specimens", get(garden::get_bed_specimens))
+        .route("/api/filters", get(garden::get_filters))
+        .route("/api/filters/{name}", get(garden::get_filter))
         .route(
             "/api/specimens/{name}/status",
             post(garden::post_specimen_status),
@@ -243,6 +314,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/control/weights", put(garden::put_weights))
         // static files fallback
         .fallback_service(ServeDir::new("static"))
+        .layer(middleware::from_fn(trace_middleware))
         .with_state(state)
 }
 

@@ -3,12 +3,16 @@
 use super::{AppState, BacktestRunStatus, SessionConfig, SessionMode};
 use crate::backtest::Backtester;
 use crate::data::HistoricalData;
-use axum::extract::State;
-use axum::http::StatusCode;
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
-use chrono::Utc;
-use pm_core::{BacktestConfig, ExitConfig};
+use chrono::{DateTime, Utc};
+use pm_core::{BacktestConfig, ExitConfig, MarketResult};
 use pm_engine::PositionSizingConfig;
+use pm_store::{
+    AuditEvent, BacktestRunRecord, DecisionRecord, NewAuditEvent, NewBacktestRun, NewSessionRun,
+    SessionRunRecord,
+};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -24,29 +28,88 @@ pub struct StatusResponse {
 }
 
 #[derive(Serialize)]
-pub struct PortfolioResponse {
-    pub cash: f64,
-    pub equity: f64,
-    pub initial_capital: f64,
-    pub return_pct: f64,
-    pub drawdown_pct: f64,
-    pub positions_count: usize,
+pub struct PositionCloseResponse {
+    pub ticker: String,
+    pub side: String,
+    pub quantity_requested: u64,
+    pub quantity_filled: u64,
+    pub fill_price: f64,
+    pub fee: Option<f64>,
+    pub pnl: Option<f64>,
+    pub cash_after: f64,
+    pub remaining_quantity: u64,
+    pub closed: bool,
+    pub timestamp: String,
+    pub price_source: String,
 }
 
 #[derive(Serialize)]
-pub struct PositionResponse {
+pub struct PositionCloseErrorResponse {
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PositionRedeemOutcome {
+    Yes,
+    No,
+    Cancelled,
+}
+
+impl PositionRedeemOutcome {
+    fn as_market_result(self) -> MarketResult {
+        match self {
+            Self::Yes => MarketResult::Yes,
+            Self::No => MarketResult::No,
+            Self::Cancelled => MarketResult::Cancelled,
+        }
+    }
+
+    fn from_market_result(result: MarketResult) -> Self {
+        match result {
+            MarketResult::Yes => Self::Yes,
+            MarketResult::No => Self::No,
+            MarketResult::Cancelled => Self::Cancelled,
+        }
+    }
+}
+
+#[derive(Deserialize, Default)]
+pub struct PositionRedeemRequest {
+    pub result: Option<PositionRedeemOutcome>,
+}
+
+#[derive(Serialize)]
+pub struct PositionRedeemResponse {
     pub ticker: String,
-    pub title: String,
-    pub category: String,
     pub side: String,
-    pub quantity: u64,
-    pub entry_price: f64,
-    pub current_price: Option<f64>,
-    pub entry_time: String,
-    pub close_time: Option<String>,
-    pub unrealized_pnl: f64,
-    pub pnl_pct: f64,
-    pub hours_held: i64,
+    pub quantity_redeemed: u64,
+    pub settlement_price: f64,
+    pub market_result: PositionRedeemOutcome,
+    pub payout: f64,
+    pub pnl: Option<f64>,
+    pub cash_after: f64,
+    pub timestamp: String,
+    pub result_source: String,
+}
+
+#[derive(Serialize)]
+pub struct PositionRedeemSkip {
+    pub ticker: String,
+    pub reason: String,
+}
+
+#[derive(Serialize)]
+pub struct PositionsRedeemResponse {
+    pub redeemed_count: usize,
+    pub skipped_count: usize,
+    pub redeemed: Vec<PositionRedeemResponse>,
+    pub skipped: Vec<PositionRedeemSkip>,
+}
+
+#[derive(Serialize)]
+pub struct PositionRedeemErrorResponse {
+    pub error: String,
 }
 
 #[derive(Serialize)]
@@ -94,99 +157,249 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<StatusRespon
     })
 }
 
-pub async fn get_portfolio(State(state): State<Arc<AppState>>) -> Json<PortfolioResponse> {
-    let ctx = state.engine.get_context().await;
-    let portfolio = &ctx.portfolio;
+pub async fn get_snapshot(State(state): State<Arc<AppState>>) -> Json<super::ws::ServerMessage> {
+    Json(super::ws::build_snapshot(&state).await)
+}
 
-    let positions_value: f64 = portfolio
-        .positions
-        .values()
-        .map(|p| p.avg_entry_price.to_f64().unwrap_or(0.0) * p.quantity as f64)
-        .sum();
+pub async fn post_daemon_shutdown(State(state): State<Arc<AppState>>) -> StatusCode {
+    match state.shutdown_tx.send(()) {
+        Ok(_) => StatusCode::ACCEPTED,
+        Err(e) => {
+            error!(error = %e, "failed to send daemon shutdown signal");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
+}
 
-    let cash = portfolio.cash.to_f64().unwrap_or(0.0);
-    let equity = cash + positions_value;
-    let initial = portfolio.initial_capital.to_f64().unwrap_or(10000.0);
-    let return_pct = if initial > 0.0 {
-        (equity - initial) / initial * 100.0
-    } else {
-        0.0
-    };
+#[derive(Serialize)]
+pub struct AuthStatusResponse {
+    pub provider: String,
+    pub public_market_data: bool,
+    pub credentials_loaded: bool,
+    pub live_trading_supported: bool,
+    pub live_trading_enabled: bool,
+    pub credential_source: Option<String>,
+    pub reason: String,
+}
 
-    let peak = state
-        .store
-        .get_peak_equity()
-        .await
-        .ok()
-        .flatten()
-        .and_then(|p| p.to_f64())
-        .unwrap_or(equity);
-
-    let drawdown_pct = if peak > 0.0 {
-        ((peak - equity) / peak * 100.0).max(0.0)
-    } else {
-        0.0
-    };
-
-    Json(PortfolioResponse {
-        cash,
-        equity,
-        initial_capital: initial,
-        return_pct,
-        drawdown_pct,
-        positions_count: portfolio.positions.len(),
+pub async fn get_auth_status() -> Json<AuthStatusResponse> {
+    Json(AuthStatusResponse {
+        provider: "kalshi".to_string(),
+        public_market_data: true,
+        credentials_loaded: false,
+        live_trading_supported: false,
+        live_trading_enabled: false,
+        credential_source: None,
+        reason: "daemon currently uses public Kalshi market data endpoints only; live credential loading is not implemented".to_string(),
     })
 }
 
-pub async fn get_positions(State(state): State<Arc<AppState>>) -> Json<Vec<PositionResponse>> {
-    let ctx = state.engine.get_context().await;
-    let current_prices = state.engine.get_current_prices().await;
-    let now = Utc::now();
+pub async fn get_portfolio(
+    State(state): State<Arc<AppState>>,
+) -> Json<super::ws::PortfolioSnapshot> {
+    Json(super::ws::build_account_snapshot(&state).await.portfolio)
+}
 
-    let positions: Vec<PositionResponse> = ctx
-        .portfolio
-        .positions
-        .values()
-        .map(|p| {
-            let entry = p.avg_entry_price.to_f64().unwrap_or(0.0);
-            let current = current_prices.get(&p.ticker).and_then(|d| d.to_f64());
+pub async fn get_positions(
+    State(state): State<Arc<AppState>>,
+) -> Json<Vec<super::ws::PositionSnapshot>> {
+    Json(super::ws::build_account_snapshot(&state).await.positions)
+}
 
-            let (unrealized_pnl, pnl_pct) = if let Some(curr) = current {
-                let effective_curr = match p.side {
-                    pm_core::Side::Yes => curr,
-                    pm_core::Side::No => 1.0 - curr,
-                };
-                let pnl = (effective_curr - entry) * p.quantity as f64;
-                let pct = if entry > 0.0 {
-                    (effective_curr - entry) / entry * 100.0
-                } else {
-                    0.0
-                };
-                (pnl, pct)
-            } else {
-                (0.0, 0.0)
-            };
+pub async fn post_position_close(
+    State(state): State<Arc<AppState>>,
+    Path(ticker): Path<String>,
+) -> Result<Json<PositionCloseResponse>, (StatusCode, Json<PositionCloseErrorResponse>)> {
+    match state.engine.close_position(&ticker).await {
+        Ok(Some(result)) => Ok(Json(PositionCloseResponse {
+            ticker: result.ticker,
+            side: format!("{:?}", result.side),
+            quantity_requested: result.quantity_requested,
+            quantity_filled: result.quantity_filled,
+            fill_price: result.fill_price.to_f64().unwrap_or(0.0),
+            fee: result.fee.and_then(|fee| fee.to_f64()),
+            pnl: result.pnl.and_then(|pnl| pnl.to_f64()),
+            cash_after: result.cash_after.to_f64().unwrap_or(0.0),
+            remaining_quantity: result.remaining_quantity,
+            closed: result.closed,
+            timestamp: result.timestamp.to_rfc3339(),
+            price_source: result.price_source,
+        })),
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            Json(PositionCloseErrorResponse {
+                error: format!("position not found: {ticker}"),
+            }),
+        )),
+        Err(err) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(PositionCloseErrorResponse {
+                error: err.to_string(),
+            }),
+        )),
+    }
+}
 
-            let hours_held = (now - p.entry_time).num_hours();
+pub async fn post_positions_redeem(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<PositionRedeemRequest>,
+) -> Result<Json<PositionsRedeemResponse>, (StatusCode, Json<PositionRedeemErrorResponse>)> {
+    if req.result.is_some() {
+        return Err(redeem_error(
+            StatusCode::BAD_REQUEST,
+            "bulk redeem does not accept an explicit result; pass a ticker to redeem manually",
+        ));
+    }
 
-            PositionResponse {
-                ticker: p.ticker.clone(),
-                title: p.title.clone(),
-                category: p.category.clone(),
-                side: format!("{:?}", p.side),
-                quantity: p.quantity,
-                entry_price: entry,
-                current_price: current,
-                entry_time: p.entry_time.to_rfc3339(),
-                close_time: p.close_time.map(|t| t.to_rfc3339()),
-                unrealized_pnl,
-                pnl_pct,
-                hours_held,
+    let tickers: Vec<String> = {
+        let ctx = state.engine.get_context().await;
+        ctx.portfolio.positions.keys().cloned().collect()
+    };
+
+    let mut redeemed = Vec::new();
+    let mut skipped = Vec::new();
+
+    for ticker in tickers {
+        let (result, source) = match lookup_redeem_result(&state, &ticker, None).await {
+            Ok(resolution) => resolution,
+            Err((StatusCode::CONFLICT, Json(err))) => {
+                skipped.push(PositionRedeemSkip {
+                    ticker,
+                    reason: err.error,
+                });
+                continue;
             }
-        })
-        .collect();
+            Err(err) => return Err(err),
+        };
 
-    Json(positions)
+        match state.engine.redeem_position(&ticker, result, source).await {
+            Ok(Some(result)) => redeemed.push(position_redeem_response(result)),
+            Ok(None) => skipped.push(PositionRedeemSkip {
+                ticker,
+                reason: "position not found".to_string(),
+            }),
+            Err(err) => {
+                return Err(redeem_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    err.to_string(),
+                ))
+            }
+        }
+    }
+
+    Ok(Json(PositionsRedeemResponse {
+        redeemed_count: redeemed.len(),
+        skipped_count: skipped.len(),
+        redeemed,
+        skipped,
+    }))
+}
+
+pub async fn post_position_redeem(
+    State(state): State<Arc<AppState>>,
+    Path(ticker): Path<String>,
+    Json(req): Json<PositionRedeemRequest>,
+) -> Result<Json<PositionRedeemResponse>, (StatusCode, Json<PositionRedeemErrorResponse>)> {
+    let (result, source) = lookup_redeem_result(&state, &ticker, req.result).await?;
+    match state.engine.redeem_position(&ticker, result, source).await {
+        Ok(Some(result)) => Ok(Json(position_redeem_response(result))),
+        Ok(None) => Err(redeem_error(
+            StatusCode::NOT_FOUND,
+            format!("position not found: {ticker}"),
+        )),
+        Err(err) => Err(redeem_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            err.to_string(),
+        )),
+    }
+}
+
+async fn lookup_redeem_result(
+    state: &Arc<AppState>,
+    ticker: &str,
+    explicit: Option<PositionRedeemOutcome>,
+) -> Result<(MarketResult, String), (StatusCode, Json<PositionRedeemErrorResponse>)> {
+    if let Some(result) = explicit {
+        return Ok((result.as_market_result(), "manual_request".to_string()));
+    }
+
+    let now = Utc::now();
+    for candidate in state.engine.get_last_candidates().await {
+        if candidate.ticker != ticker || candidate.close_time > now {
+            continue;
+        }
+        if let Some(result) = candidate.result {
+            return Ok((result, "daemon_candidates".to_string()));
+        }
+    }
+
+    match state.historical_store.get_historical_market(ticker).await {
+        Ok(Some(row)) => {
+            let close_time = row.close_time.parse::<DateTime<Utc>>().map_err(|e| {
+                redeem_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("failed to parse historical close_time for {ticker}: {e}"),
+                )
+            })?;
+            if close_time > now {
+                return Err(redeem_error(
+                    StatusCode::CONFLICT,
+                    format!("position is not resolved yet: {ticker}"),
+                ));
+            }
+            if let Some(result) = row.result.as_deref().and_then(parse_market_result) {
+                return Ok((result, "historical_store".to_string()));
+            }
+            Err(redeem_error(
+                StatusCode::CONFLICT,
+                format!("no resolved result available for {ticker}"),
+            ))
+        }
+        Ok(None) => Err(redeem_error(
+            StatusCode::CONFLICT,
+            format!("no resolved result available for {ticker}"),
+        )),
+        Err(err) => Err(redeem_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            err.to_string(),
+        )),
+    }
+}
+
+fn parse_market_result(value: &str) -> Option<MarketResult> {
+    match value.trim().to_lowercase().as_str() {
+        "yes" => Some(MarketResult::Yes),
+        "no" => Some(MarketResult::No),
+        "cancelled" | "canceled" => Some(MarketResult::Cancelled),
+        _ => None,
+    }
+}
+
+fn position_redeem_response(result: crate::engine::ManualRedeemResult) -> PositionRedeemResponse {
+    PositionRedeemResponse {
+        ticker: result.ticker,
+        side: format!("{:?}", result.side),
+        quantity_redeemed: result.quantity_redeemed,
+        settlement_price: result.settlement_price.to_f64().unwrap_or(0.0),
+        market_result: PositionRedeemOutcome::from_market_result(result.market_result),
+        payout: result.payout.to_f64().unwrap_or(0.0),
+        pnl: result.pnl.and_then(|pnl| pnl.to_f64()),
+        cash_after: result.cash_after.to_f64().unwrap_or(0.0),
+        timestamp: result.timestamp.to_rfc3339(),
+        result_source: result.result_source,
+    }
+}
+
+fn redeem_error(
+    status: StatusCode,
+    error: impl Into<String>,
+) -> (StatusCode, Json<PositionRedeemErrorResponse>) {
+    (
+        status,
+        Json(PositionRedeemErrorResponse {
+            error: error.into(),
+        }),
+    )
 }
 
 pub async fn get_trades(State(state): State<Arc<AppState>>) -> Json<Vec<TradeResponse>> {
@@ -286,6 +499,7 @@ pub struct BacktestRequest {
 #[derive(Serialize)]
 pub struct BacktestStatusResponse {
     pub status: String,
+    pub run_id: Option<String>,
     pub elapsed_secs: Option<u64>,
     pub error: Option<String>,
     pub phase: Option<String>,
@@ -310,6 +524,58 @@ pub struct BacktestLiveSnapshotResponse {
 #[derive(Serialize)]
 pub struct BacktestErrorResponse {
     pub error: String,
+}
+
+async fn finish_backtest_session(
+    store: &Arc<pm_store::SqliteStore>,
+    session_state: &Arc<tokio::sync::RwLock<super::SessionState>>,
+    status: &str,
+    reason: Option<&str>,
+) {
+    let session_id = {
+        let session = session_state.read().await;
+        if session.mode == SessionMode::Backtest && !session.session_id.is_empty() {
+            Some(session.session_id.clone())
+        } else {
+            None
+        }
+    };
+
+    let Some(session_id) = session_id else {
+        return;
+    };
+
+    if let Err(e) = store.finish_session_run(&session_id, status, reason).await {
+        error!(session_id = %session_id, status = %status, error = %e, "failed to persist session end");
+    }
+
+    let mut session = session_state.write().await;
+    if session.mode == SessionMode::Backtest && session.session_id == session_id {
+        *session = super::SessionState::default();
+    }
+}
+
+async fn mark_backtest_failed(
+    store: &Arc<pm_store::SqliteStore>,
+    backtest_state: &Arc<tokio::sync::Mutex<super::BacktestState>>,
+    session_state: &Arc<tokio::sync::RwLock<super::SessionState>>,
+    run_id: &str,
+    message: String,
+) {
+    {
+        let mut guard = backtest_state.lock().await;
+        guard.status = BacktestRunStatus::Failed;
+        guard.error = Some(message.clone());
+    }
+
+    if let Err(e) = store
+        .finish_backtest_run_with_error(run_id, "failed", &message)
+        .await
+    {
+        error!(run_id = %run_id, error = %e, "failed to persist failed backtest run");
+    }
+
+    finish_backtest_session(store, session_state, "failed", Some(&message)).await;
 }
 
 pub async fn post_backtest_run(
@@ -345,29 +611,6 @@ pub async fn post_backtest_run(
         )
     })?;
 
-    info!(
-        start = %start_time,
-        end = %end_time,
-        "starting backtest from web UI"
-    );
-
-    let progress = Arc::new(super::BacktestProgress::new(0));
-
-    {
-        let mut guard = state.backtest.lock().await;
-        guard.status = BacktestRunStatus::Running {
-            started_at: Utc::now(),
-        };
-        guard.progress = Some(progress.clone());
-        guard.result = None;
-        guard.error = None;
-        guard.live_snapshot = None;
-    }
-
-    let backtest_state = state.backtest.clone();
-    let session_state = state.session.clone();
-    let progress = progress.clone();
-
     let capital = req.capital.unwrap_or(10000.0);
     let max_positions = req.max_positions.unwrap_or(100);
     let max_position = req.max_position.unwrap_or(100);
@@ -379,9 +622,65 @@ pub async fn post_backtest_run(
     let max_hold_hours = req.max_hold_hours.unwrap_or(48);
 
     let historical_store = state.historical_store.clone();
+    let run_store = state.store.clone();
     let parquet_data_dir = state.parquet_data_dir.clone();
-    let use_parquet = req.data_source.as_deref() == Some("parquet")
-        || parquet_data_dir.is_some();
+    let use_parquet = req.data_source.as_deref() == Some("parquet") || parquet_data_dir.is_some();
+    let data_source = if use_parquet { "parquet" } else { "sqlite" }.to_string();
+    let run_id = uuid::Uuid::new_v4().to_string();
+    let started_at = Utc::now();
+
+    run_store
+        .record_backtest_run_started(&NewBacktestRun {
+            run_id: run_id.clone(),
+            started_at: started_at.clone(),
+            start_time: start_time.clone(),
+            end_time: end_time.clone(),
+            capital,
+            max_positions,
+            max_position,
+            interval_hours,
+            kelly_fraction,
+            max_position_pct,
+            take_profit,
+            stop_loss,
+            max_hold_hours,
+            data_source: data_source.clone(),
+        })
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to persist backtest run start");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BacktestErrorResponse {
+                    error: "failed to persist backtest run".into(),
+                }),
+            )
+        })?;
+
+    info!(
+        run_id = %run_id,
+        start = %start_time,
+        end = %end_time,
+        data_source = %data_source,
+        "starting backtest from web UI"
+    );
+
+    let progress = Arc::new(super::BacktestProgress::new(0));
+
+    {
+        let mut guard = state.backtest.lock().await;
+        guard.status = BacktestRunStatus::Running { started_at };
+        guard.run_id = Some(run_id.clone());
+        guard.progress = Some(progress.clone());
+        guard.result = None;
+        guard.error = None;
+        guard.live_snapshot = None;
+    }
+
+    let backtest_state = state.backtest.clone();
+    let session_state = state.session.clone();
+    let progress = progress.clone();
+    let run_id_for_task = run_id.clone();
 
     tokio::spawn(async move {
         let data = if use_parquet {
@@ -390,27 +689,28 @@ pub async fn post_backtest_run(
                 match crate::data::load_parquet(parquet_dir, Some((start_time, end_time))) {
                     Ok(d) => Arc::new(d),
                     Err(e) => {
-                        let mut guard = backtest_state.lock().await;
-                        guard.status = BacktestRunStatus::Failed;
-                        guard.error = Some(format!("failed to load parquet data: {}", e));
+                        let message = format!("failed to load parquet data: {}", e);
                         error!(error = %e, "backtest parquet load failed");
-
-                        let mut session = session_state.write().await;
-                        if session.mode == SessionMode::Backtest {
-                            *session = super::SessionState::default();
-                        }
+                        mark_backtest_failed(
+                            &run_store,
+                            &backtest_state,
+                            &session_state,
+                            &run_id_for_task,
+                            message,
+                        )
+                        .await;
                         return;
                     }
                 }
             } else {
-                let mut guard = backtest_state.lock().await;
-                guard.status = BacktestRunStatus::Failed;
-                guard.error = Some("parquet data source requested but no parquet_data_dir configured".into());
-
-                let mut session = session_state.write().await;
-                if session.mode == SessionMode::Backtest {
-                    *session = super::SessionState::default();
-                }
+                mark_backtest_failed(
+                    &run_store,
+                    &backtest_state,
+                    &session_state,
+                    &run_id_for_task,
+                    "parquet data source requested but no parquet_data_dir configured".into(),
+                )
+                .await;
                 return;
             }
         } else {
@@ -418,15 +718,16 @@ pub async fn post_backtest_run(
             match HistoricalData::load_sqlite(&historical_store, start_time, end_time).await {
                 Ok(d) => Arc::new(d),
                 Err(e) => {
-                    let mut guard = backtest_state.lock().await;
-                    guard.status = BacktestRunStatus::Failed;
-                    guard.error = Some(format!("failed to load data from sqlite: {}", e));
+                    let message = format!("failed to load data from sqlite: {}", e);
                     error!(error = %e, "backtest sqlite load failed");
-
-                    let mut session = session_state.write().await;
-                    if session.mode == SessionMode::Backtest {
-                        *session = super::SessionState::default();
-                    }
+                    mark_backtest_failed(
+                        &run_store,
+                        &backtest_state,
+                        &session_state,
+                        &run_id_for_task,
+                        message,
+                    )
+                    .await;
                     return;
                 }
             }
@@ -464,15 +765,26 @@ pub async fn post_backtest_run(
                 }
             });
         let result = backtester.run().await;
+        let result_json = match serde_json::to_value(&result) {
+            Ok(value) => value,
+            Err(e) => {
+                error!(run_id = %run_id_for_task, error = %e, "failed to serialize backtest result");
+                serde_json::Value::Null
+            }
+        };
+
+        if let Err(e) = run_store
+            .complete_backtest_run(&run_id_for_task, &result_json)
+            .await
+        {
+            error!(run_id = %run_id_for_task, error = %e, "failed to persist completed backtest run");
+        }
 
         let mut guard = backtest_state.lock().await;
         guard.status = BacktestRunStatus::Complete;
         guard.result = Some(result);
 
-        let mut session = session_state.write().await;
-        if session.mode == SessionMode::Backtest {
-            *session = super::SessionState::default();
-        }
+        finish_backtest_session(&run_store, &session_state, "complete", None).await;
     });
 
     Ok(StatusCode::OK)
@@ -529,6 +841,7 @@ pub async fn get_backtest_status(
 
     Json(BacktestStatusResponse {
         status: status_str,
+        run_id: guard.run_id.clone(),
         elapsed_secs: elapsed,
         error,
         phase,
@@ -549,24 +862,83 @@ pub async fn get_backtest_result(
     }
 }
 
+#[derive(Deserialize)]
+pub struct BacktestRunsQuery {
+    #[serde(default = "default_backtest_runs_limit")]
+    pub limit: u32,
+}
+
+fn default_backtest_runs_limit() -> u32 {
+    25
+}
+
+pub async fn get_backtest_runs(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<BacktestRunsQuery>,
+) -> Result<Json<Vec<BacktestRunRecord>>, StatusCode> {
+    match state.store.get_recent_backtest_runs(query.limit).await {
+        Ok(mut runs) => {
+            for run in &mut runs {
+                run.result = None;
+            }
+            Ok(Json(runs))
+        }
+        Err(e) => {
+            error!(error = %e, "failed to get backtest runs");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+pub async fn get_backtest_run(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<BacktestRunRecord>, StatusCode> {
+    match state.store.get_backtest_run(&id).await {
+        Ok(Some(run)) => Ok(Json(run)),
+        Ok(None) => Err(StatusCode::NOT_FOUND),
+        Err(e) => {
+            error!(id = %id, error = %e, "failed to get backtest run");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
 pub async fn post_backtest_stop(State(state): State<Arc<AppState>>) -> StatusCode {
-    {
+    let stopped_run_id = {
         let mut guard = state.backtest.lock().await;
+        let was_running = matches!(guard.status, BacktestRunStatus::Running { .. });
+        let run_id = guard.run_id.take();
         // Reset backtest state
         guard.status = BacktestRunStatus::Idle;
         guard.error = None;
         guard.progress = None;
         guard.live_snapshot = None;
-        // Keep result if there was one
-    }
+        // Keep result if there was one. Only a running job should rewrite durable history as stopped.
+        if was_running {
+            run_id
+        } else {
+            None
+        }
+    };
 
-    // Also reset session state
-    {
-        let mut session = state.session.write().await;
-        if session.mode == super::SessionMode::Backtest {
-            *session = super::SessionState::default();
+    if let Some(run_id) = stopped_run_id {
+        if let Err(e) = state
+            .store
+            .finish_backtest_run_with_error(&run_id, "stopped", "backtest stopped/reset via API")
+            .await
+        {
+            error!(run_id = %run_id, error = %e, "failed to persist stopped backtest run");
         }
     }
+
+    finish_backtest_session(
+        &state.store,
+        &state.session,
+        "stopped",
+        Some("backtest stopped/reset via API"),
+    )
+    .await;
 
     info!("backtest stopped/reset via API");
     StatusCode::OK
@@ -603,6 +975,104 @@ pub struct SessionErrorResponse {
     pub error: String,
 }
 
+#[derive(Deserialize)]
+pub struct SessionsQuery {
+    #[serde(default = "default_sessions_limit")]
+    pub limit: u32,
+}
+
+fn default_sessions_limit() -> u32 {
+    25
+}
+
+fn session_error(
+    status: StatusCode,
+    error: impl Into<String>,
+) -> (StatusCode, Json<SessionErrorResponse>) {
+    (
+        status,
+        Json(SessionErrorResponse {
+            error: error.into(),
+        }),
+    )
+}
+
+fn session_config_value(
+    config: Option<&SessionConfig>,
+) -> Result<Option<serde_json::Value>, (StatusCode, Json<SessionErrorResponse>)> {
+    config
+        .map(serde_json::to_value)
+        .transpose()
+        .map_err(|e| session_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+async fn persist_session_started(
+    state: &Arc<AppState>,
+    session: &super::SessionState,
+) -> Result<(), (StatusCode, Json<SessionErrorResponse>)> {
+    state
+        .store
+        .record_session_started(&NewSessionRun {
+            session_id: session.session_id.clone(),
+            mode: session.mode.to_string(),
+            started_at: session.started_at.clone().unwrap_or_else(Utc::now),
+            config: session_config_value(session.config.as_ref())?,
+        })
+        .await
+        .map(|_| ())
+        .map_err(|e| {
+            error!(session_id = %session.session_id, error = %e, "failed to persist session start");
+            session_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to persist session start",
+            )
+        })
+}
+
+async fn finish_session_record(
+    state: &Arc<AppState>,
+    session_id: &str,
+    status: &str,
+    reason: Option<&str>,
+) {
+    if let Err(e) = state
+        .store
+        .finish_session_run(session_id, status, reason)
+        .await
+    {
+        error!(session_id = %session_id, status = %status, error = %e, "failed to persist session end");
+    }
+}
+
+pub async fn get_sessions(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<SessionsQuery>,
+) -> Result<Json<Vec<SessionRunRecord>>, StatusCode> {
+    state
+        .store
+        .get_recent_session_runs(query.limit)
+        .await
+        .map(Json)
+        .map_err(|e| {
+            error!(error = %e, "failed to get session runs");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
+}
+
+pub async fn get_session_run(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<SessionRunRecord>, StatusCode> {
+    match state.store.get_session_run(&id).await {
+        Ok(Some(run)) => Ok(Json(run)),
+        Ok(None) => Err(StatusCode::NOT_FOUND),
+        Err(e) => {
+            error!(id = %id, error = %e, "failed to get session run");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
 pub async fn post_session_start(
     State(state): State<Arc<AppState>>,
     Json(req): Json<SessionStartRequest>,
@@ -610,20 +1080,20 @@ pub async fn post_session_start(
     {
         let session = state.session.read().await;
         if session.trading_active {
-            return Err((
+            return Err(session_error(
                 StatusCode::CONFLICT,
-                Json(SessionErrorResponse {
-                    error: "session already running".into(),
-                }),
+                "session already running",
             ));
         }
     }
 
     match req.mode {
         SessionMode::Paper => {
+            let session = super::SessionState::new_session(SessionMode::Paper, req.config);
+            persist_session_started(&state, &session).await?;
             {
-                let mut session = state.session.write().await;
-                *session = super::SessionState::new_session(SessionMode::Paper, req.config);
+                let mut active = state.session.write().await;
+                *active = session;
             }
 
             state.engine.resume().await;
@@ -633,19 +1103,28 @@ pub async fn post_session_start(
         SessionMode::Backtest => {
             let config = req.config;
             let start = config.backtest_start.clone().ok_or_else(|| {
-                (
+                session_error(
                     StatusCode::BAD_REQUEST,
-                    Json(SessionErrorResponse {
-                        error: "backtest_start required for backtest mode".into(),
-                    }),
+                    "backtest_start required for backtest mode",
                 )
             })?;
             let end = config.backtest_end.clone().ok_or_else(|| {
-                (
+                session_error(
                     StatusCode::BAD_REQUEST,
-                    Json(SessionErrorResponse {
-                        error: "backtest_end required for backtest mode".into(),
-                    }),
+                    "backtest_end required for backtest mode",
+                )
+            })?;
+
+            crate::parse_date(&start).map_err(|e| {
+                session_error(
+                    StatusCode::BAD_REQUEST,
+                    format!("invalid backtest_start: {e}"),
+                )
+            })?;
+            crate::parse_date(&end).map_err(|e| {
+                session_error(
+                    StatusCode::BAD_REQUEST,
+                    format!("invalid backtest_end: {e}"),
                 )
             })?;
 
@@ -664,43 +1143,71 @@ pub async fn post_session_start(
                 data_source: None,
             };
 
-            let state_for_backtest = state.clone();
-            post_backtest_run(State(state_for_backtest), Json(backtest_req))
-                .await
-                .map_err(|(code, Json(e))| {
-                    (
-                        code,
-                        Json(SessionErrorResponse {
-                            error: e.error.clone(),
-                        }),
-                    )
-                })?;
-
+            let session = super::SessionState::new_session(SessionMode::Backtest, config);
+            let session_id = session.session_id.clone();
+            persist_session_started(&state, &session).await?;
             {
-                let mut session = state.session.write().await;
-                *session = super::SessionState::new_session(SessionMode::Backtest, config);
+                let mut active = state.session.write().await;
+                *active = session;
             }
+
+            let state_for_backtest = state.clone();
+            if let Err((code, Json(e))) =
+                post_backtest_run(State(state_for_backtest), Json(backtest_req)).await
+            {
+                {
+                    let mut active = state.session.write().await;
+                    if active.session_id == session_id {
+                        *active = super::SessionState::default();
+                    }
+                }
+                finish_session_record(&state, &session_id, "failed", Some(&e.error)).await;
+                return Err((code, Json(SessionErrorResponse { error: e.error })));
+            }
+
             Ok(StatusCode::OK)
         }
-        SessionMode::Live => Err((
+        SessionMode::Live => Err(session_error(
             StatusCode::NOT_IMPLEMENTED,
-            Json(SessionErrorResponse {
-                error: "live trading not yet implemented".into(),
-            }),
+            "live trading not yet implemented",
         )),
         SessionMode::Idle => {
-            let mut session = state.session.write().await;
-            session.mode = SessionMode::Idle;
-            session.trading_active = false;
+            let stopped_session_id = {
+                let mut session = state.session.write().await;
+                let id = (!session.session_id.is_empty()).then(|| session.session_id.clone());
+                *session = super::SessionState::default();
+                id
+            };
+            if let Some(session_id) = stopped_session_id {
+                finish_session_record(
+                    &state,
+                    &session_id,
+                    "stopped",
+                    Some("session set idle via API"),
+                )
+                .await;
+            }
             Ok(StatusCode::OK)
         }
     }
 }
 
 pub async fn post_session_stop(State(state): State<Arc<AppState>>) -> StatusCode {
-    {
+    let stopped_session_id = {
         let mut session = state.session.write().await;
+        let id = (!session.session_id.is_empty()).then(|| session.session_id.clone());
         *session = super::SessionState::default();
+        id
+    };
+
+    if let Some(session_id) = stopped_session_id {
+        finish_session_record(
+            &state,
+            &session_id,
+            "stopped",
+            Some("session stopped via API"),
+        )
+        .await;
     }
 
     state
@@ -715,8 +1222,29 @@ pub async fn post_session_config(
     State(state): State<Arc<AppState>>,
     Json(config): Json<SessionConfig>,
 ) -> StatusCode {
-    let mut session = state.session.write().await;
-    session.config = Some(config);
+    let session_id = {
+        let mut session = state.session.write().await;
+        session.config = Some(config.clone());
+        (!session.session_id.is_empty()).then(|| session.session_id.clone())
+    };
+
+    if let Some(session_id) = session_id {
+        match serde_json::to_value(&config) {
+            Ok(config_value) => {
+                if let Err(e) = state
+                    .store
+                    .update_session_config(&session_id, Some(&config_value))
+                    .await
+                {
+                    error!(session_id = %session_id, error = %e, "failed to persist session config update");
+                }
+            }
+            Err(e) => {
+                error!(session_id = %session_id, error = %e, "failed to serialize session config update")
+            }
+        }
+    }
+
     info!("session config updated via API");
     StatusCode::OK
 }
@@ -901,7 +1429,7 @@ fn default_limit() -> usize {
 
 pub async fn get_markets(
     State(state): State<Arc<AppState>>,
-    axum::extract::Query(query): axum::extract::Query<MarketsQuery>,
+    Query(query): Query<MarketsQuery>,
 ) -> Json<Vec<MarketResponse>> {
     let candidates = state.engine.get_last_candidates().await;
     let ctx = state.engine.get_context().await;
@@ -929,4 +1457,112 @@ pub async fn get_markets(
         .collect();
 
     Json(markets)
+}
+
+#[derive(Deserialize)]
+pub struct DecisionsQuery {
+    #[serde(default = "default_decision_limit")]
+    pub limit: u32,
+}
+
+fn default_decision_limit() -> u32 {
+    100
+}
+
+pub async fn get_decisions(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<DecisionsQuery>,
+) -> Result<Json<Vec<DecisionRecord>>, StatusCode> {
+    state
+        .store
+        .get_recent_decisions(query.limit)
+        .await
+        .map(Json)
+        .map_err(|e| {
+            error!(error = %e, "failed to get recent decisions");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
+}
+
+pub async fn get_decision(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> Result<Json<DecisionRecord>, StatusCode> {
+    match state.store.get_decision(id).await {
+        Ok(Some(decision)) => Ok(Json(decision)),
+        Ok(None) => Err(StatusCode::NOT_FOUND),
+        Err(e) => {
+            error!(id, error = %e, "failed to get decision");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+pub async fn get_market_decisions(
+    State(state): State<Arc<AppState>>,
+    Path(ticker): Path<String>,
+    Query(query): Query<DecisionsQuery>,
+) -> Result<Json<Vec<DecisionRecord>>, StatusCode> {
+    state
+        .store
+        .get_decisions_for_ticker(&ticker, query.limit)
+        .await
+        .map(Json)
+        .map_err(|e| {
+            error!(ticker = %ticker, error = %e, "failed to get decisions for ticker");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
+}
+
+#[derive(Deserialize)]
+pub struct AuditQuery {
+    #[serde(default = "default_audit_limit")]
+    pub limit: u32,
+}
+
+fn default_audit_limit() -> u32 {
+    100
+}
+
+#[derive(Serialize)]
+pub struct AuditEventCreated {
+    pub id: i64,
+}
+
+pub async fn get_audit_events(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<AuditQuery>,
+) -> Result<Json<Vec<AuditEvent>>, StatusCode> {
+    state
+        .store
+        .get_recent_audit_events(query.limit)
+        .await
+        .map(Json)
+        .map_err(|e| {
+            error!(error = %e, "failed to get audit events");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
+}
+
+pub async fn post_audit_event(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(mut event): Json<NewAuditEvent>,
+) -> Result<Json<AuditEventCreated>, StatusCode> {
+    if event.trace_id.is_none() {
+        event.trace_id = headers
+            .get(super::TRACE_ID_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+    }
+
+    state
+        .store
+        .record_audit_event(&event)
+        .await
+        .map(|id| Json(AuditEventCreated { id }))
+        .map_err(|e| {
+            error!(error = %e, "failed to record audit event");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
 }

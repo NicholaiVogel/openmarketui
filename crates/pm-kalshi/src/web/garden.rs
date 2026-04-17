@@ -7,6 +7,8 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize)]
@@ -34,6 +36,18 @@ pub struct SpecimenResponse {
     pub weight: f64,
     pub hit_rate: Option<f64>,
     pub avg_contribution: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FilterResponse {
+    pub name: String,
+    pub filter_type: String,
+    pub description: String,
+    pub status: String,
+    pub enabled: bool,
+    pub active: bool,
+    pub source: String,
+    pub config: Value,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -150,6 +164,21 @@ pub async fn get_bed_specimens(
     Ok(Json(bed_specimens))
 }
 
+pub async fn get_filters(State(state): State<Arc<AppState>>) -> Json<Vec<FilterResponse>> {
+    Json(build_filter_registry(&state))
+}
+
+pub async fn get_filter(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> Result<Json<FilterResponse>, StatusCode> {
+    build_filter_registry(&state)
+        .into_iter()
+        .find(|filter| filter.name == name || filter.filter_type == name)
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
+}
+
 pub async fn post_specimen_status(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
@@ -226,4 +255,81 @@ pub async fn put_weights(
     }
 
     StatusCode::OK
+}
+
+fn build_filter_registry(state: &AppState) -> Vec<FilterResponse> {
+    let active = state.engine.get_filter_registry();
+    let active_names: HashSet<String> = active.iter().map(|filter| filter.name.clone()).collect();
+    let mut filters: Vec<FilterResponse> = active
+        .into_iter()
+        .map(|filter| FilterResponse {
+            description: filter_description(&filter.name).to_string(),
+            status: "active".to_string(),
+            active: true,
+            source: "daemon_pipeline".to_string(),
+            name: filter.name,
+            filter_type: filter.filter_type,
+            enabled: filter.enabled,
+            config: filter.config,
+        })
+        .collect();
+
+    let registry = pm_garden::default_kalshi_registry();
+    for name in registry.list_filters() {
+        if active_names.contains(name) {
+            continue;
+        }
+        filters.push(FilterResponse {
+            name: name.to_string(),
+            filter_type: filter_type(name).to_string(),
+            description: filter_description(name).to_string(),
+            status: "available".to_string(),
+            enabled: false,
+            active: false,
+            source: "kalshi_registry".to_string(),
+            config: default_filter_config(name),
+        });
+    }
+
+    filters.sort_by(|left, right| left.name.cmp(&right.name));
+    filters
+}
+
+fn filter_type(name: &str) -> &'static str {
+    match name {
+        "already_positioned" => "AlreadyPositionedFilter",
+        "category" => "CategoryFilter",
+        "liquidity" => "LiquidityFilter",
+        "price_range" => "PriceRangeFilter",
+        "spread" => "SpreadFilter",
+        "time_to_close" => "TimeToCloseFilter",
+        "volatility" => "VolatilityFilter",
+        _ => "Filter",
+    }
+}
+
+fn filter_description(name: &str) -> &'static str {
+    match name {
+        "already_positioned" => "prevents adding exposure beyond the configured per-market cap",
+        "category" => "allows or rejects markets by category",
+        "liquidity" => "rejects markets below the configured 24-hour volume threshold",
+        "price_range" => "keeps markets whose current price sits inside a configured range",
+        "spread" => "rejects markets with wide implied bid-ask spreads",
+        "time_to_close" => "keeps markets inside the configured time-to-close window",
+        "volatility" => "keeps markets inside a configured volatility band",
+        _ => "registered pipeline filter",
+    }
+}
+
+fn default_filter_config(name: &str) -> Value {
+    match name {
+        "already_positioned" => json!({ "max_position_per_market": 100 }),
+        "category" => json!({ "whitelist": null, "blacklist": null }),
+        "liquidity" => json!({ "min_volume_24h": 100 }),
+        "price_range" => json!({ "min_price": 0.1, "max_price": 0.9 }),
+        "spread" => json!({ "max_spread": 0.05 }),
+        "time_to_close" => json!({ "min_hours": 2, "max_hours": null }),
+        "volatility" => json!({ "min_volatility": 0.0, "max_volatility": 1.0 }),
+        _ => Value::Null,
+    }
 }

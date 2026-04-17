@@ -78,6 +78,69 @@ CREATE TABLE IF NOT EXISTS decisions (
 CREATE INDEX IF NOT EXISTS idx_decisions_timestamp ON decisions(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_decisions_ticker ON decisions(ticker);
 
+CREATE TABLE IF NOT EXISTS audit_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    command TEXT NOT NULL,
+    profile TEXT,
+    dry_run INTEGER NOT NULL DEFAULT 0,
+    request_json TEXT,
+    result_json TEXT,
+    trace_id TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_events_timestamp ON audit_events(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_events_actor ON audit_events(actor);
+CREATE INDEX IF NOT EXISTS idx_audit_events_command ON audit_events(command);
+
+CREATE TABLE IF NOT EXISTS backtest_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL UNIQUE,
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    status TEXT NOT NULL,
+    start_time TEXT NOT NULL,
+    end_time TEXT NOT NULL,
+    capital REAL NOT NULL,
+    max_positions INTEGER NOT NULL,
+    max_position INTEGER NOT NULL,
+    interval_hours INTEGER NOT NULL,
+    kelly_fraction REAL NOT NULL,
+    max_position_pct REAL NOT NULL,
+    take_profit REAL NOT NULL,
+    stop_loss REAL NOT NULL,
+    max_hold_hours INTEGER NOT NULL,
+    data_source TEXT NOT NULL,
+    total_return REAL,
+    total_return_pct REAL,
+    sharpe_ratio REAL,
+    max_drawdown_pct REAL,
+    win_rate REAL,
+    total_trades INTEGER,
+    result_json TEXT,
+    error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_backtest_runs_started_at ON backtest_runs(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_backtest_runs_status ON backtest_runs(status);
+
+CREATE TABLE IF NOT EXISTS session_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL UNIQUE,
+    mode TEXT NOT NULL,
+    status TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    trading_active INTEGER NOT NULL DEFAULT 1,
+    config_json TEXT,
+    stop_reason TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_runs_started_at ON session_runs(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_session_runs_status ON session_runs(status);
+CREATE INDEX IF NOT EXISTS idx_session_runs_mode ON session_runs(mode);
+
 CREATE TABLE IF NOT EXISTS market_cache (
     ticker TEXT PRIMARY KEY,
     title TEXT NOT NULL,

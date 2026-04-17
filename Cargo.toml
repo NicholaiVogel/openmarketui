@@ -7,6 +7,7 @@ members = [
     "crates/pm-engine",
     "crates/pm-server",
     "crates/pm-kalshi",
+    "crates/omu",
 ]
 exclude = [
     "compost/kalshi",
