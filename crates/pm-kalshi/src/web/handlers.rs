@@ -133,6 +133,29 @@ pub async fn post_daemon_shutdown(State(state): State<Arc<AppState>>) -> StatusC
     }
 }
 
+#[derive(Serialize)]
+pub struct AuthStatusResponse {
+    pub provider: String,
+    pub public_market_data: bool,
+    pub credentials_loaded: bool,
+    pub live_trading_supported: bool,
+    pub live_trading_enabled: bool,
+    pub credential_source: Option<String>,
+    pub reason: String,
+}
+
+pub async fn get_auth_status() -> Json<AuthStatusResponse> {
+    Json(AuthStatusResponse {
+        provider: "kalshi".to_string(),
+        public_market_data: true,
+        credentials_loaded: false,
+        live_trading_supported: false,
+        live_trading_enabled: false,
+        credential_source: None,
+        reason: "daemon currently uses public Kalshi market data endpoints only; live credential loading is not implemented".to_string(),
+    })
+}
+
 pub async fn get_portfolio(State(state): State<Arc<AppState>>) -> Json<PortfolioResponse> {
     let ctx = state.engine.get_context().await;
     let portfolio = &ctx.portfolio;

@@ -1,4 +1,5 @@
 mod audit;
+mod auth;
 mod backtest;
 mod config;
 mod daemon;
@@ -34,6 +35,7 @@ pub(crate) async fn execute(cli: &Cli, context: &OutputContext) -> Result<Value,
         Commands::Backtest(cmd) => backtest::handle(cli, &client, cmd).await,
         Commands::Sessions(cmd) => sessions::handle(cli, &client, cmd).await,
         Commands::Audit(cmd) => audit::handle(&client, cmd).await,
+        Commands::Auth(cmd) => auth::handle(cli, context, &client, cmd).await,
         Commands::Config(cmd) => config::handle(cli, context, &client, cmd).await,
         Commands::Profiles(cmd) => profiles::handle(cli, context, cmd).await,
     }

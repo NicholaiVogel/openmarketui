@@ -3,7 +3,8 @@ use crate::cli::{Cli, ProfileCreateArgs, ProfilePolicyArgs, ProfilesCommand, Pro
 use crate::error::CliError;
 use crate::output::OutputContext;
 use crate::settings::{
-    LoadedSettings, PolicyConfig, ProfileConfig, DEFAULT_DAEMON_URL, DEFAULT_PROFILE,
+    redacted_auth_value, LoadedSettings, PolicyConfig, ProfileConfig, DEFAULT_DAEMON_URL,
+    DEFAULT_PROFILE,
 };
 use serde_json::{json, Value};
 
@@ -35,6 +36,7 @@ fn list(cli: &Cli, context: &OutputContext) -> Result<Value, CliError> {
                 "daemon_url": profile.daemon_url.as_deref().unwrap_or(DEFAULT_DAEMON_URL),
                 "kalshi_config": profile.kalshi_config,
                 "policy": profile.policy,
+                "auth": redacted_auth_value(profile.auth.as_ref()),
             })
         })
         .collect();
@@ -63,6 +65,7 @@ fn show(cli: &Cli, context: &OutputContext, name: Option<&str>) -> Result<Value,
             "daemon_url": profile.daemon_url.as_deref().unwrap_or(DEFAULT_DAEMON_URL),
             "kalshi_config": profile.kalshi_config,
             "policy": profile.policy,
+            "auth": redacted_auth_value(profile.auth.as_ref()),
         }));
     }
 
@@ -77,6 +80,7 @@ fn show(cli: &Cli, context: &OutputContext, name: Option<&str>) -> Result<Value,
             "daemon_url": resolved.daemon_url,
             "kalshi_config": resolved.kalshi_config,
             "policy": resolved.policy,
+            "auth": null,
         }));
     }
 
@@ -101,6 +105,7 @@ fn create(cli: &Cli, context: &OutputContext, args: &ProfileCreateArgs) -> Resul
             allow_live: args.allow_live,
             ..PolicyConfig::default()
         },
+        auth: None,
     };
 
     if cli.dry_run {

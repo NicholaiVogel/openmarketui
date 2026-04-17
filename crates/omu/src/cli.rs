@@ -73,6 +73,7 @@ pub(crate) enum Commands {
     Backtest(BacktestCommand),
     Sessions(SessionsCommand),
     Audit(AuditCommand),
+    Auth(AuthCommand),
     Config(ConfigCommand),
     Profiles(ProfilesCommand),
 }
@@ -440,6 +441,55 @@ pub(crate) enum AuditSubcommand {
         #[arg(long, default_value_t = 100)]
         limit: u32,
     },
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AuthCommand {
+    #[command(subcommand)]
+    pub(crate) command: AuthSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum AuthSubcommand {
+    Status(AuthStatusArgs),
+    Add(AuthAddArgs),
+    Rotate(AuthRotateArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AuthStatusArgs {
+    #[arg(long)]
+    pub(crate) local_only: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AuthAddArgs {
+    #[command(flatten)]
+    pub(crate) credentials: AuthCredentialsArgs,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AuthRotateArgs {
+    #[command(flatten)]
+    pub(crate) credentials: AuthCredentialsArgs,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AuthCredentialsArgs {
+    #[arg(long)]
+    pub(crate) provider: Option<String>,
+
+    #[arg(long)]
+    pub(crate) key_id: Option<String>,
+
+    #[arg(long)]
+    pub(crate) key_id_env: Option<String>,
+
+    #[arg(long)]
+    pub(crate) private_key_path: Option<PathBuf>,
+
+    #[arg(long)]
+    pub(crate) private_key_env: Option<String>,
 }
 
 #[derive(Debug, Args)]

@@ -3,7 +3,7 @@ use crate::cli::{Cli, ConfigCommand, ConfigSubcommand};
 use crate::client::DaemonClient;
 use crate::error::CliError;
 use crate::output::OutputContext;
-use crate::settings::LoadedSettings;
+use crate::settings::{redacted_config_value, LoadedSettings};
 use serde_json::{json, Value};
 
 pub(super) async fn handle(
@@ -39,7 +39,7 @@ fn show(cli: &Cli, context: &OutputContext) -> Result<Value, CliError> {
         "path": settings.path.display().to_string(),
         "exists": settings.exists,
         "active_profile": resolved,
-        "config": settings.config,
+        "config": redacted_config_value(&settings.config),
     }))
 }
 

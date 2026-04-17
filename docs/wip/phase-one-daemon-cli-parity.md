@@ -160,9 +160,12 @@ As of 2026-04-17, the first Rust `omu` slice is in place:
   `GET /api/sessions`, `GET /api/sessions/{id}`, and
   `omu sessions list|show`. Paper and backtest session lifecycle is now recorded
   as running, stopped, complete, or failed through the daemon.
+- Added redacted auth command parity through `omu auth add|status|rotate` and
+  `GET /api/auth/status`. The CLI stores credential metadata locally, never
+  prints raw key IDs, and reports daemon live-auth readiness separately.
 
-The next major parity gaps are position redeem controls, auth commands, and
-OpenTelemetry trace propagation.
+The next major parity gaps are position redeem controls and OpenTelemetry trace
+propagation.
 
 ## Architecture target
 
@@ -309,9 +312,9 @@ This maps Phase One CLI commands to the current Watchtower or daemon surface.
 | `omu profiles create` | Create profile | Local config | Add in `omu`. |
 | `omu profiles set-default` | Set default profile | Local config | Add in `omu`. |
 | `omu profiles policy` | Show/update policy | Local config | Add in `omu`. |
-| `omu auth add` | Add credentials | Local secret/config concern | Must avoid echoing secrets. |
-| `omu auth status` | Check auth configured | Local plus daemon check | Redacted. |
-| `omu auth rotate` | Rotate credentials | Local secret/config concern | Destructive, require confirmation. |
+| `omu auth add` | Add credentials | Local secret/config concern | Implemented with redacted output and local profile metadata. |
+| `omu auth status` | Check auth configured | Local plus `/api/auth/status` | Implemented; reports local credential availability and daemon live-auth readiness. |
+| `omu auth rotate` | Rotate credentials | Local secret/config concern | Implemented, confirmation-gated, redacted, and audit-attempted when daemon is reachable. |
 
 ## Gaps to close first
 
@@ -647,10 +650,9 @@ Until then, `omu sessions create --mode live` should return a stable
 Keep the short path and close the remaining trust gates:
 
 1. Add position redeem controls once Kalshi live-mode semantics are clear.
-2. Add redacted auth commands and daemon auth-status checks.
-3. Add OpenTelemetry spans and trace IDs across CLI commands, daemon handlers,
+2. Add OpenTelemetry spans and trace IDs across CLI commands, daemon handlers,
    session lifecycle, backtests, and execution.
-4. Continue aligning REST and WebSocket response shapes so Watchtower and `omu`
+3. Continue aligning REST and WebSocket response shapes so Watchtower and `omu`
    stay attached to the same source of truth.
 
 This keeps the system honest: one daemon, two attached operator surfaces, no

@@ -1,5 +1,6 @@
 use crate::error::CliError;
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -29,6 +30,40 @@ pub(crate) struct ProfileConfig {
     pub(crate) kalshi_config: Option<String>,
     #[serde(default)]
     pub(crate) policy: PolicyConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) auth: Option<AuthConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct AuthConfig {
+    #[serde(default = "default_auth_provider")]
+    pub(crate) provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) key_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) key_id_env: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) private_key_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) private_key_env: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) created_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) updated_at: Option<String>,
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            provider: default_auth_provider(),
+            key_id: None,
+            key_id_env: None,
+            private_key_path: None,
+            private_key_env: None,
+            created_at: None,
+            updated_at: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,6 +157,61 @@ impl LoadedSettings {
     }
 }
 
+pub(crate) fn redacted_config_value(config: &OmuConfig) -> Value {
+    let profiles = config
+        .profiles
+        .iter()
+        .map(|(name, profile)| (name.clone(), redacted_profile_value(profile)))
+        .collect::<serde_json::Map<_, _>>();
+
+    json!({
+        "default_profile": config.default_profile,
+        "profiles": profiles,
+    })
+}
+
+pub(crate) fn redacted_profile_value(profile: &ProfileConfig) -> Value {
+    json!({
+        "daemon_url": profile.daemon_url,
+        "kalshi_config": profile.kalshi_config,
+        "policy": profile.policy,
+        "auth": redacted_auth_value(profile.auth.as_ref()),
+    })
+}
+
+pub(crate) fn redacted_auth_value(auth: Option<&AuthConfig>) -> Value {
+    let Some(auth) = auth else {
+        return Value::Null;
+    };
+
+    json!({
+        "provider": auth.provider,
+        "key_id_configured": auth.key_id.is_some() || auth.key_id_env.is_some(),
+        "key_id": auth.key_id.as_deref().map(redact_identifier),
+        "key_id_env": auth.key_id_env,
+        "private_key_configured": auth.private_key_path.is_some() || auth.private_key_env.is_some(),
+        "private_key_path": auth.private_key_path,
+        "private_key_env": auth.private_key_env,
+        "created_at": auth.created_at,
+        "updated_at": auth.updated_at,
+    })
+}
+
+pub(crate) fn redact_identifier(value: &str) -> String {
+    let chars = value.chars().collect::<Vec<_>>();
+    let len = chars.len();
+    if len <= 4 {
+        return "****".to_string();
+    }
+    if len <= 8 {
+        return format!("{}…{}", chars[0], chars[len - 1]);
+    }
+
+    let start = chars.iter().take(4).collect::<String>();
+    let end = chars.iter().skip(len.saturating_sub(4)).collect::<String>();
+    format!("{start}…{end}")
+}
+
 pub(crate) fn config_path(config_dir: Option<&Path>) -> Result<PathBuf, CliError> {
     if let Some(config_dir) = config_dir {
         return Ok(config_dir.join("omu.toml"));
@@ -144,4 +234,8 @@ fn default_profile_name() -> String {
 
 fn default_require_yes() -> bool {
     true
+}
+
+fn default_auth_provider() -> String {
+    "kalshi".to_string()
 }

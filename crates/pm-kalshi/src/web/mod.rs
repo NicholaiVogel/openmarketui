@@ -208,6 +208,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         // existing REST endpoints
         .route("/api/status", get(handlers::get_status))
         .route("/api/daemon/shutdown", post(handlers::post_daemon_shutdown))
+        .route("/api/auth/status", get(handlers::get_auth_status))
         .route("/api/snapshot", get(handlers::get_snapshot))
         .route("/api/portfolio", get(handlers::get_portfolio))
         .route("/api/positions", get(handlers::get_positions))
