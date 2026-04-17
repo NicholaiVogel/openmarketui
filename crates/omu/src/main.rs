@@ -16,6 +16,12 @@ use settings::LoadedSettings;
 async fn main() {
     let mut cli = Cli::parse();
     let format = cli.format;
+    let trace_id = cli
+        .trace_id
+        .clone()
+        .filter(|trace_id| !trace_id.trim().is_empty())
+        .unwrap_or_else(new_trace_id);
+    cli.trace_id = Some(trace_id.clone());
     let command_scoped_daemon_url = match &cli.command {
         Commands::Profiles(command) => match &command.command {
             ProfilesSubcommand::Create(args) => args.daemon_url.clone(),
@@ -41,7 +47,7 @@ async fn main() {
                     .unwrap_or_else(|| "omu.toml".to_string()),
                 kalshi_config: None,
                 dry_run: cli.dry_run,
-                trace_id: None,
+                trace_id: Some(trace_id.clone()),
             };
             let _ = print_error(format, &context, &err);
             std::process::exit(err.exit_code());
@@ -72,7 +78,7 @@ async fn main() {
         config_path: settings.path.display().to_string(),
         kalshi_config: resolved.kalshi_config.clone(),
         dry_run: cli.dry_run,
-        trace_id: None,
+        trace_id: Some(trace_id.clone()),
     };
 
     match execute(&cli, &context).await {
@@ -87,4 +93,8 @@ async fn main() {
             std::process::exit(err.exit_code());
         }
     }
+}
+
+fn new_trace_id() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
 }

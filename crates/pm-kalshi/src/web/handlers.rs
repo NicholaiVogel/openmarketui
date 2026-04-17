@@ -4,7 +4,7 @@ use super::{AppState, BacktestRunStatus, SessionConfig, SessionMode};
 use crate::backtest::Backtester;
 use crate::data::HistoricalData;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use chrono::{DateTime, Utc};
 use pm_core::{BacktestConfig, ExitConfig, MarketResult};
@@ -1655,8 +1655,16 @@ pub async fn get_audit_events(
 
 pub async fn post_audit_event(
     State(state): State<Arc<AppState>>,
-    Json(event): Json<NewAuditEvent>,
+    headers: HeaderMap,
+    Json(mut event): Json<NewAuditEvent>,
 ) -> Result<Json<AuditEventCreated>, StatusCode> {
+    if event.trace_id.is_none() {
+        event.trace_id = headers
+            .get(super::TRACE_ID_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+    }
+
     state
         .store
         .record_audit_event(&event)

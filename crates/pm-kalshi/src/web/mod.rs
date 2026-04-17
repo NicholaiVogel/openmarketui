@@ -8,6 +8,10 @@ use crate::backtest::BacktestLiveSnapshot;
 use crate::data::{DataFetcher, FetchState};
 use crate::engine::PaperTradingEngine;
 use crate::metrics::BacktestResult;
+use axum::body::Body;
+use axum::http::{HeaderValue, Request};
+use axum::middleware::{self, Next};
+use axum::response::Response;
 use axum::routing::{get, post, put};
 use axum::Router;
 use chrono::{DateTime, Utc};
@@ -18,8 +22,45 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use tower_http::services::ServeDir;
+use tracing::Instrument;
 
 pub use ws::{PipelineMetrics, ServerMessage};
+
+pub const TRACE_ID_HEADER: &str = "x-omu-trace-id";
+
+async fn trace_middleware(mut request: Request<Body>, next: Next) -> Response {
+    let trace_id = request
+        .headers()
+        .get(TRACE_ID_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
+
+    if let Ok(value) = HeaderValue::from_str(&trace_id) {
+        request.headers_mut().insert(TRACE_ID_HEADER, value);
+    }
+
+    let method = request.method().clone();
+    let path = request.uri().path().to_string();
+    let span = tracing::info_span!(
+        "daemon_request",
+        trace_id = %trace_id,
+        method = %method,
+        path = %path
+    );
+
+    async move {
+        let mut response = next.run(request).await;
+        if let Ok(value) = HeaderValue::from_str(&trace_id) {
+            response.headers_mut().insert(TRACE_ID_HEADER, value);
+        }
+        tracing::debug!(status = %response.status(), "request complete");
+        response
+    }
+    .instrument(span)
+    .await
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -273,6 +314,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/control/weights", put(garden::put_weights))
         // static files fallback
         .fallback_service(ServeDir::new("static"))
+        .layer(middleware::from_fn(trace_middleware))
         .with_state(state)
 }
 

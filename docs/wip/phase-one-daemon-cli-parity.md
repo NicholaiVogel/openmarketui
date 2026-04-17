@@ -171,8 +171,12 @@ As of 2026-04-17, the first Rust `omu` slice is in place:
   redeem only claims positions with a daemon-candidate or historical-store
   result; manual ticker redeem is confirmation-gated and audit-recorded by the
   CLI.
+- Added trace ID propagation through global `--trace-id` / `OMU_TRACE_ID`,
+  generated CLI trace IDs, `x-omu-trace-id` daemon request headers, response
+  header echoing, daemon request spans, and persisted audit-event trace IDs.
 
-The next major parity gap is OpenTelemetry trace propagation.
+The next major parity gaps are full OpenTelemetry exporter wiring and
+REST/WebSocket response shape alignment.
 
 ## Architecture target
 
@@ -515,7 +519,7 @@ All JSON responses should follow a stable envelope:
   "meta": {
     "profile": "default",
     "daemon_url": "http://127.0.0.1:3030",
-    "trace_id": null
+    "trace_id": "4f0b4f5e2df74ed895b7c5a5dcaf2a2b"
   }
 }
 ```
@@ -656,8 +660,8 @@ Until then, `omu sessions create --mode live` should return a stable
 
 Keep the short path and close the remaining trust gates:
 
-1. Add OpenTelemetry spans and trace IDs across CLI commands, daemon handlers,
-   session lifecycle, backtests, and execution.
+1. Finish OpenTelemetry exporter wiring beyond the request/audit trace ID slice,
+   especially session lifecycle, backtests, execution, decisions, and fills.
 2. Continue aligning REST and WebSocket response shapes so Watchtower and `omu`
    stay attached to the same source of truth.
 

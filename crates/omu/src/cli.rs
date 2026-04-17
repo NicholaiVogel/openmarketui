@@ -28,6 +28,9 @@ pub(crate) struct Cli {
     #[arg(long, global = true)]
     pub(crate) yes: bool,
 
+    #[arg(long, env = "OMU_TRACE_ID", global = true)]
+    pub(crate) trace_id: Option<String>,
+
     #[arg(long, global = true)]
     pub(crate) dry_run: bool,
 

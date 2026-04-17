@@ -1,16 +1,19 @@
 use crate::error::CliError;
-use reqwest::Url;
+use reqwest::{header::HeaderValue, RequestBuilder, Url};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
+
+const TRACE_ID_HEADER: &str = "x-omu-trace-id";
 
 #[derive(Debug, Clone)]
 pub struct DaemonClient {
     base_url: Url,
     inner: reqwest::Client,
+    trace_id: Option<String>,
 }
 
 impl DaemonClient {
-    pub fn new(base_url: String) -> Result<Self, CliError> {
+    pub fn new(base_url: String, trace_id: Option<String>) -> Result<Self, CliError> {
         let normalized = if base_url.ends_with('/') {
             base_url
         } else {
@@ -21,6 +24,7 @@ impl DaemonClient {
         Ok(Self {
             base_url,
             inner: reqwest::Client::new(),
+            trace_id,
         })
     }
 
@@ -33,8 +37,7 @@ impl DaemonClient {
         T: DeserializeOwned,
     {
         let response = self
-            .inner
-            .get(self.url(path)?)
+            .with_trace_header(self.inner.get(self.url(path)?))?
             .send()
             .await
             .map_err(|source| CliError::DaemonUnavailable {
@@ -51,8 +54,7 @@ impl DaemonClient {
         B: Serialize + ?Sized,
     {
         let response = self
-            .inner
-            .post(self.url(path)?)
+            .with_trace_header(self.inner.post(self.url(path)?))?
             .json(body)
             .send()
             .await
@@ -69,8 +71,7 @@ impl DaemonClient {
         B: Serialize + ?Sized,
     {
         let response = self
-            .inner
-            .post(self.url(path)?)
+            .with_trace_header(self.inner.post(self.url(path)?))?
             .json(body)
             .send()
             .await
@@ -84,8 +85,7 @@ impl DaemonClient {
 
     pub async fn post_empty(&self, path: &str) -> Result<(), CliError> {
         let response = self
-            .inner
-            .post(self.url(path)?)
+            .with_trace_header(self.inner.post(self.url(path)?))?
             .send()
             .await
             .map_err(|source| CliError::DaemonUnavailable {
@@ -94,6 +94,17 @@ impl DaemonClient {
             })?;
 
         self.ensure_success(path, response).await
+    }
+
+    fn with_trace_header(&self, builder: RequestBuilder) -> Result<RequestBuilder, CliError> {
+        let Some(trace_id) = self.trace_id.as_deref() else {
+            return Ok(builder);
+        };
+        let value = HeaderValue::from_str(trace_id).map_err(|_| CliError::InvalidArgument {
+            message: "trace ID contains characters that are not valid in an HTTP header"
+                .to_string(),
+        })?;
+        Ok(builder.header(TRACE_ID_HEADER, value))
     }
 
     fn url(&self, path: &str) -> Result<Url, CliError> {

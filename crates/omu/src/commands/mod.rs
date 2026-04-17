@@ -21,7 +21,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 pub(crate) async fn execute(cli: &Cli, context: &OutputContext) -> Result<Value, CliError> {
-    let client = DaemonClient::new(context.daemon_url.clone())?;
+    let client = DaemonClient::new(context.daemon_url.clone(), context.trace_id.clone())?;
 
     match &cli.command {
         Commands::Daemon(cmd) => daemon::handle(cli, context, &client, cmd).await,
@@ -89,7 +89,7 @@ where
         "dry_run": cli.dry_run,
         "request": serde_json::to_value(request).unwrap_or(Value::Null),
         "result": serde_json::to_value(result).unwrap_or(Value::Null),
-        "trace_id": Value::Null,
+        "trace_id": cli.trace_id.as_deref(),
     });
 
     match client.post_json::<Value, _>("/api/audit", &event).await {
