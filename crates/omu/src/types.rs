@@ -13,11 +13,19 @@ pub struct PositionResponse {
     pub side: String,
     pub quantity: u64,
     pub entry_price: f64,
+    #[serde(default)]
+    pub avg_entry_price: f64,
     pub current_price: Option<f64>,
+    #[serde(default)]
+    pub cost_basis: f64,
+    #[serde(default)]
+    pub market_value: f64,
     pub entry_time: String,
     pub close_time: Option<String>,
     pub unrealized_pnl: f64,
     pub pnl_pct: f64,
+    #[serde(default)]
+    pub unrealized_pnl_pct: f64,
     pub hours_held: i64,
 }
 

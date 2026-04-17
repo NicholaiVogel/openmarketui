@@ -28,32 +28,6 @@ pub struct StatusResponse {
 }
 
 #[derive(Serialize)]
-pub struct PortfolioResponse {
-    pub cash: f64,
-    pub equity: f64,
-    pub initial_capital: f64,
-    pub return_pct: f64,
-    pub drawdown_pct: f64,
-    pub positions_count: usize,
-}
-
-#[derive(Serialize)]
-pub struct PositionResponse {
-    pub ticker: String,
-    pub title: String,
-    pub category: String,
-    pub side: String,
-    pub quantity: u64,
-    pub entry_price: f64,
-    pub current_price: Option<f64>,
-    pub entry_time: String,
-    pub close_time: Option<String>,
-    pub unrealized_pnl: f64,
-    pub pnl_pct: f64,
-    pub hours_held: i64,
-}
-
-#[derive(Serialize)]
 pub struct PositionCloseResponse {
     pub ticker: String,
     pub side: String,
@@ -220,99 +194,16 @@ pub async fn get_auth_status() -> Json<AuthStatusResponse> {
     })
 }
 
-pub async fn get_portfolio(State(state): State<Arc<AppState>>) -> Json<PortfolioResponse> {
-    let ctx = state.engine.get_context().await;
-    let portfolio = &ctx.portfolio;
-
-    let positions_value: f64 = portfolio
-        .positions
-        .values()
-        .map(|p| p.avg_entry_price.to_f64().unwrap_or(0.0) * p.quantity as f64)
-        .sum();
-
-    let cash = portfolio.cash.to_f64().unwrap_or(0.0);
-    let equity = cash + positions_value;
-    let initial = portfolio.initial_capital.to_f64().unwrap_or(10000.0);
-    let return_pct = if initial > 0.0 {
-        (equity - initial) / initial * 100.0
-    } else {
-        0.0
-    };
-
-    let peak = state
-        .store
-        .get_peak_equity()
-        .await
-        .ok()
-        .flatten()
-        .and_then(|p| p.to_f64())
-        .unwrap_or(equity);
-
-    let drawdown_pct = if peak > 0.0 {
-        ((peak - equity) / peak * 100.0).max(0.0)
-    } else {
-        0.0
-    };
-
-    Json(PortfolioResponse {
-        cash,
-        equity,
-        initial_capital: initial,
-        return_pct,
-        drawdown_pct,
-        positions_count: portfolio.positions.len(),
-    })
+pub async fn get_portfolio(
+    State(state): State<Arc<AppState>>,
+) -> Json<super::ws::PortfolioSnapshot> {
+    Json(super::ws::build_account_snapshot(&state).await.portfolio)
 }
 
-pub async fn get_positions(State(state): State<Arc<AppState>>) -> Json<Vec<PositionResponse>> {
-    let ctx = state.engine.get_context().await;
-    let current_prices = state.engine.get_current_prices().await;
-    let now = Utc::now();
-
-    let positions: Vec<PositionResponse> = ctx
-        .portfolio
-        .positions
-        .values()
-        .map(|p| {
-            let entry = p.avg_entry_price.to_f64().unwrap_or(0.0);
-            let current = current_prices.get(&p.ticker).and_then(|d| d.to_f64());
-
-            let (unrealized_pnl, pnl_pct) = if let Some(curr) = current {
-                let effective_curr = match p.side {
-                    pm_core::Side::Yes => curr,
-                    pm_core::Side::No => 1.0 - curr,
-                };
-                let pnl = (effective_curr - entry) * p.quantity as f64;
-                let pct = if entry > 0.0 {
-                    (effective_curr - entry) / entry * 100.0
-                } else {
-                    0.0
-                };
-                (pnl, pct)
-            } else {
-                (0.0, 0.0)
-            };
-
-            let hours_held = (now - p.entry_time).num_hours();
-
-            PositionResponse {
-                ticker: p.ticker.clone(),
-                title: p.title.clone(),
-                category: p.category.clone(),
-                side: format!("{:?}", p.side),
-                quantity: p.quantity,
-                entry_price: entry,
-                current_price: current,
-                entry_time: p.entry_time.to_rfc3339(),
-                close_time: p.close_time.map(|t| t.to_rfc3339()),
-                unrealized_pnl,
-                pnl_pct,
-                hours_held,
-            }
-        })
-        .collect();
-
-    Json(positions)
+pub async fn get_positions(
+    State(state): State<Arc<AppState>>,
+) -> Json<Vec<super::ws::PositionSnapshot>> {
+    Json(super::ws::build_account_snapshot(&state).await.positions)
 }
 
 pub async fn post_position_close(

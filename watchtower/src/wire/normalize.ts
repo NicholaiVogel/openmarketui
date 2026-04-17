@@ -30,9 +30,12 @@ interface WirePortfolio {
   cash: number;
   equity: number;
   initial_capital: number;
+  positions_value?: number;
   return_pct: number;
+  total_return_pct?: number;
   drawdown_pct: number;
   positions_count: number;
+  position_count?: number;
   realized_pnl: number;
   unrealized_pnl: number;
   total_pnl: number;
@@ -45,10 +48,15 @@ interface WirePosition {
   side: string;
   quantity: number;
   entry_price: number;
+  avg_entry_price?: number;
   current_price?: number;
+  cost_basis?: number;
+  market_value?: number;
   entry_time: string;
+  close_time?: string;
   unrealized_pnl: number;
   pnl_pct: number;
+  unrealized_pnl_pct?: number;
   hours_held: number;
 }
 
@@ -123,9 +131,12 @@ export function normalizePortfolio(wire: WirePortfolio): PortfolioSnapshot {
     cash: wire.cash,
     equity: wire.equity,
     initialCapital: wire.initial_capital,
+    positionsValue: wire.positions_value ?? wire.equity - wire.cash,
     returnPct: wire.return_pct,
+    totalReturnPct: wire.total_return_pct ?? wire.return_pct,
     drawdownPct: wire.drawdown_pct,
     positionsCount: wire.positions_count,
+    positionCount: wire.position_count ?? wire.positions_count,
     realizedPnl: wire.realized_pnl,
     unrealizedPnl: wire.unrealized_pnl,
     totalPnl: wire.total_pnl,
@@ -140,10 +151,15 @@ export function normalizePosition(wire: WirePosition): Position {
     side: wire.side as "Yes" | "No",
     quantity: wire.quantity,
     entryPrice: wire.entry_price,
+    avgEntryPrice: wire.avg_entry_price ?? wire.entry_price,
     currentPrice: wire.current_price,
+    costBasis: wire.cost_basis ?? wire.entry_price * wire.quantity,
+    marketValue: wire.market_value ?? (wire.current_price ?? wire.entry_price) * wire.quantity,
     entryTime: wire.entry_time,
+    closeTime: wire.close_time,
     unrealizedPnl: wire.unrealized_pnl,
     pnlPct: wire.pnl_pct,
+    unrealizedPnlPct: wire.unrealized_pnl_pct ?? wire.pnl_pct,
     hoursHeld: wire.hours_held,
   };
 }

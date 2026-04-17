@@ -15,9 +15,12 @@ export interface PortfolioSnapshot {
   cash: number;
   equity: number;
   initialCapital: number;
+  positionsValue: number;
   returnPct: number;
+  totalReturnPct: number;
   drawdownPct: number;
   positionsCount: number;
+  positionCount: number;
   realizedPnl: number;
   unrealizedPnl: number;
   totalPnl: number;

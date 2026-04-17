@@ -174,9 +174,13 @@ As of 2026-04-17, the first Rust `omu` slice is in place:
 - Added trace ID propagation through global `--trace-id` / `OMU_TRACE_ID`,
   generated CLI trace IDs, `x-omu-trace-id` daemon request headers, response
   header echoing, daemon request spans, and persisted audit-event trace IDs.
+- Aligned REST and WebSocket portfolio/position shapes around a shared daemon
+  account snapshot builder. `/api/portfolio`, `/api/positions`, `/api/snapshot`,
+  and Watchtower normalization now use the same mark-to-market fields for cash,
+  equity, position value, realized/unrealized P&L, and position-level cost/value.
 
-The next major parity gaps are full OpenTelemetry exporter wiring and
-REST/WebSocket response shape alignment.
+The next major parity gap is full OpenTelemetry exporter wiring across
+session lifecycle, backtests, execution, decisions, and fills.
 
 ## Architecture target
 
@@ -284,7 +288,7 @@ This maps Phase One CLI commands to the current Watchtower or daemon surface.
 | `omu sessions show` | Show active/session details | `/api/session/status`, `/api/sessions/{id}` | Implemented for active and historical sessions. |
 | `omu sessions create` | Start paper/backtest/live session | `/api/session/start` | Implemented for paper/backtest with durable lifecycle records. Live returns `POLICY_BLOCKED`. |
 | `omu sessions stop` | Stop current session | `/api/session/stop` | Implemented and records stopped lifecycle state. |
-| `omu portfolio summary` | Cash, equity, return, drawdown | `/api/portfolio` | Existing response lacks realized/unrealized P&L present in WS snapshot. Align shapes. |
+| `omu portfolio summary` | Cash, equity, return, drawdown | `/api/portfolio` | Aligned with shared daemon account snapshot, including realized/unrealized P&L. |
 | `omu portfolio history` | Equity history | `/api/equity` | Existing. |
 | `omu portfolio equity-curve` | Machine-readable equity curve | `/api/equity` | Existing. |
 | `omu positions list` | Show open positions | `/api/positions` | Existing. |
@@ -419,12 +423,11 @@ This is the core agent debugging path.
 
 ### 4. Align REST and WebSocket response shapes
 
-Some fields exist in the WebSocket snapshot but not the REST endpoints. For
-example, `PortfolioSnapshot` includes realized, unrealized, and total P&L, while
-`PortfolioResponse` does not.
-
-Phase One should make REST and WebSocket shapes match where they represent the
-same concept. That reduces drift between Watchtower and `omu`.
+REST and WebSocket portfolio/position shapes now flow through the shared daemon
+account snapshot builder. `/api/portfolio`, `/api/positions`, `/api/snapshot`,
+and Watchtower normalization all carry the same cash, equity, position value,
+realized/unrealized P&L, and position cost/value fields. Keep future additions
+on this shared path so Watchtower and `omu` do not drift.
 
 ### 5. Add filter registry endpoints
 
@@ -662,8 +665,8 @@ Keep the short path and close the remaining trust gates:
 
 1. Finish OpenTelemetry exporter wiring beyond the request/audit trace ID slice,
    especially session lifecycle, backtests, execution, decisions, and fills.
-2. Continue aligning REST and WebSocket response shapes so Watchtower and `omu`
-   stay attached to the same source of truth.
+2. Continue filling small CLI parity gaps while keeping Watchtower and `omu`
+   attached to the daemon account snapshot source of truth.
 
 This keeps the system honest: one daemon, two attached operator surfaces, no
 split-brain trading logic.

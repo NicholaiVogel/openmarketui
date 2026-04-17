@@ -21,10 +21,15 @@ export interface Position {
   side: "Yes" | "No";
   quantity: number;
   entryPrice: number;
+  avgEntryPrice: number;
   currentPrice?: number;
+  costBasis: number;
+  marketValue: number;
   entryTime: string;
+  closeTime?: string;
   unrealizedPnl: number;
   pnlPct: number;
+  unrealizedPnlPct: number;
   hoursHeld: number;
 }
 
