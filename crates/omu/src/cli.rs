@@ -144,8 +144,34 @@ pub(crate) struct PositionsCommand {
 #[derive(Debug, Subcommand)]
 pub(crate) enum PositionsSubcommand {
     List,
-    Show { ticker: String },
-    Close { ticker: String },
+    Show {
+        ticker: String,
+    },
+    Close {
+        ticker: String,
+    },
+    Redeem {
+        ticker: Option<String>,
+        #[arg(long, value_enum)]
+        result: Option<PositionResultArg>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum PositionResultArg {
+    Yes,
+    No,
+    Cancelled,
+}
+
+impl PositionResultArg {
+    pub(crate) fn as_daemon_result(self) -> &'static str {
+        match self {
+            Self::Yes => "yes",
+            Self::No => "no",
+            Self::Cancelled => "cancelled",
+        }
+    }
 }
 
 #[derive(Debug, Args)]

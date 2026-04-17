@@ -7,7 +7,8 @@ use crate::pipeline::TradingPipeline;
 use crate::sources::{LiveKalshiSource, PaperExecutor};
 use chrono::Utc;
 use pm_core::{
-    Filter, OrderExecutor, Portfolio, Scorer, Selector, Side, Trade, TradeType, TradingContext,
+    Fill, Filter, MarketResult, OrderExecutor, Portfolio, Scorer, Selector, Side, Trade, TradeType,
+    TradingContext,
 };
 use pm_engine::{CbCheckContext, CbStatus, CircuitBreakerState};
 use pm_garden::{
@@ -77,6 +78,20 @@ pub struct ManualCloseResult {
     pub closed: bool,
     pub timestamp: chrono::DateTime<Utc>,
     pub price_source: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ManualRedeemResult {
+    pub ticker: String,
+    pub side: Side,
+    pub quantity_redeemed: u64,
+    pub settlement_price: Decimal,
+    pub market_result: MarketResult,
+    pub payout: Decimal,
+    pub pnl: Option<Decimal>,
+    pub cash_after: Decimal,
+    pub timestamp: chrono::DateTime<Utc>,
+    pub result_source: String,
 }
 
 pub struct PaperTradingEngine {
@@ -284,6 +299,67 @@ impl PaperTradingEngine {
             closed: remaining_quantity == 0,
             timestamp: exit_fill.timestamp,
             price_source,
+        }))
+    }
+
+    pub async fn redeem_position(
+        &self,
+        ticker: &str,
+        result: MarketResult,
+        result_source: impl Into<String>,
+    ) -> anyhow::Result<Option<ManualRedeemResult>> {
+        let now = Utc::now();
+        let position = {
+            let ctx = self.context.read().await;
+            ctx.portfolio.positions.get(ticker).cloned()
+        };
+        let Some(position) = position else {
+            return Ok(None);
+        };
+
+        let settlement_price =
+            settlement_price_for_position(position.side, result, position.avg_entry_price);
+        let payout = settlement_price * Decimal::from(position.quantity);
+
+        let mut ctx = self.context.write().await;
+        if !ctx.portfolio.positions.contains_key(ticker) {
+            return Ok(None);
+        }
+
+        let pnl = ctx.portfolio.resolve_position(ticker, result);
+        ctx.trading_history.push(Trade {
+            ticker: ticker.to_string(),
+            side: position.side,
+            quantity: position.quantity,
+            price: settlement_price,
+            timestamp: now,
+            trade_type: TradeType::Resolution,
+        });
+
+        let fill = Fill {
+            ticker: ticker.to_string(),
+            side: position.side,
+            quantity: position.quantity,
+            price: settlement_price,
+            timestamp: now,
+            fee: None,
+        };
+        self.store
+            .record_fill(&fill, pnl, Some("manual_redeem"))
+            .await?;
+        self.store.save_portfolio(&ctx.portfolio).await?;
+
+        Ok(Some(ManualRedeemResult {
+            ticker: ticker.to_string(),
+            side: position.side,
+            quantity_redeemed: position.quantity,
+            settlement_price,
+            market_result: result,
+            payout,
+            pnl,
+            cash_after: ctx.portfolio.cash,
+            timestamp: now,
+            result_source: result_source.into(),
         }))
     }
 
@@ -791,5 +867,23 @@ impl PaperTradingEngine {
     async fn count_recent_fills(&self, hours: i64) -> u32 {
         let since = Utc::now() - chrono::Duration::hours(hours);
         self.store.get_fills_since(since).await.unwrap_or(0)
+    }
+}
+
+fn settlement_price_for_position(
+    side: Side,
+    result: MarketResult,
+    cancelled_price: Decimal,
+) -> Decimal {
+    match result {
+        MarketResult::Yes => match side {
+            Side::Yes => Decimal::ONE,
+            Side::No => Decimal::ZERO,
+        },
+        MarketResult::No => match side {
+            Side::Yes => Decimal::ZERO,
+            Side::No => Decimal::ONE,
+        },
+        MarketResult::Cancelled => cancelled_price,
     }
 }

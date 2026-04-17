@@ -6,8 +6,8 @@ use crate::data::HistoricalData;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
-use chrono::Utc;
-use pm_core::{BacktestConfig, ExitConfig};
+use chrono::{DateTime, Utc};
+use pm_core::{BacktestConfig, ExitConfig, MarketResult};
 use pm_engine::PositionSizingConfig;
 use pm_store::{
     AuditEvent, BacktestRunRecord, DecisionRecord, NewAuditEvent, NewBacktestRun, NewSessionRun,
@@ -71,6 +71,70 @@ pub struct PositionCloseResponse {
 
 #[derive(Serialize)]
 pub struct PositionCloseErrorResponse {
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PositionRedeemOutcome {
+    Yes,
+    No,
+    Cancelled,
+}
+
+impl PositionRedeemOutcome {
+    fn as_market_result(self) -> MarketResult {
+        match self {
+            Self::Yes => MarketResult::Yes,
+            Self::No => MarketResult::No,
+            Self::Cancelled => MarketResult::Cancelled,
+        }
+    }
+
+    fn from_market_result(result: MarketResult) -> Self {
+        match result {
+            MarketResult::Yes => Self::Yes,
+            MarketResult::No => Self::No,
+            MarketResult::Cancelled => Self::Cancelled,
+        }
+    }
+}
+
+#[derive(Deserialize, Default)]
+pub struct PositionRedeemRequest {
+    pub result: Option<PositionRedeemOutcome>,
+}
+
+#[derive(Serialize)]
+pub struct PositionRedeemResponse {
+    pub ticker: String,
+    pub side: String,
+    pub quantity_redeemed: u64,
+    pub settlement_price: f64,
+    pub market_result: PositionRedeemOutcome,
+    pub payout: f64,
+    pub pnl: Option<f64>,
+    pub cash_after: f64,
+    pub timestamp: String,
+    pub result_source: String,
+}
+
+#[derive(Serialize)]
+pub struct PositionRedeemSkip {
+    pub ticker: String,
+    pub reason: String,
+}
+
+#[derive(Serialize)]
+pub struct PositionsRedeemResponse {
+    pub redeemed_count: usize,
+    pub skipped_count: usize,
+    pub redeemed: Vec<PositionRedeemResponse>,
+    pub skipped: Vec<PositionRedeemSkip>,
+}
+
+#[derive(Serialize)]
+pub struct PositionRedeemErrorResponse {
     pub error: String,
 }
 
@@ -283,6 +347,168 @@ pub async fn post_position_close(
             }),
         )),
     }
+}
+
+pub async fn post_positions_redeem(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<PositionRedeemRequest>,
+) -> Result<Json<PositionsRedeemResponse>, (StatusCode, Json<PositionRedeemErrorResponse>)> {
+    if req.result.is_some() {
+        return Err(redeem_error(
+            StatusCode::BAD_REQUEST,
+            "bulk redeem does not accept an explicit result; pass a ticker to redeem manually",
+        ));
+    }
+
+    let tickers: Vec<String> = {
+        let ctx = state.engine.get_context().await;
+        ctx.portfolio.positions.keys().cloned().collect()
+    };
+
+    let mut redeemed = Vec::new();
+    let mut skipped = Vec::new();
+
+    for ticker in tickers {
+        let (result, source) = match lookup_redeem_result(&state, &ticker, None).await {
+            Ok(resolution) => resolution,
+            Err((StatusCode::CONFLICT, Json(err))) => {
+                skipped.push(PositionRedeemSkip {
+                    ticker,
+                    reason: err.error,
+                });
+                continue;
+            }
+            Err(err) => return Err(err),
+        };
+
+        match state.engine.redeem_position(&ticker, result, source).await {
+            Ok(Some(result)) => redeemed.push(position_redeem_response(result)),
+            Ok(None) => skipped.push(PositionRedeemSkip {
+                ticker,
+                reason: "position not found".to_string(),
+            }),
+            Err(err) => {
+                return Err(redeem_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    err.to_string(),
+                ))
+            }
+        }
+    }
+
+    Ok(Json(PositionsRedeemResponse {
+        redeemed_count: redeemed.len(),
+        skipped_count: skipped.len(),
+        redeemed,
+        skipped,
+    }))
+}
+
+pub async fn post_position_redeem(
+    State(state): State<Arc<AppState>>,
+    Path(ticker): Path<String>,
+    Json(req): Json<PositionRedeemRequest>,
+) -> Result<Json<PositionRedeemResponse>, (StatusCode, Json<PositionRedeemErrorResponse>)> {
+    let (result, source) = lookup_redeem_result(&state, &ticker, req.result).await?;
+    match state.engine.redeem_position(&ticker, result, source).await {
+        Ok(Some(result)) => Ok(Json(position_redeem_response(result))),
+        Ok(None) => Err(redeem_error(
+            StatusCode::NOT_FOUND,
+            format!("position not found: {ticker}"),
+        )),
+        Err(err) => Err(redeem_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            err.to_string(),
+        )),
+    }
+}
+
+async fn lookup_redeem_result(
+    state: &Arc<AppState>,
+    ticker: &str,
+    explicit: Option<PositionRedeemOutcome>,
+) -> Result<(MarketResult, String), (StatusCode, Json<PositionRedeemErrorResponse>)> {
+    if let Some(result) = explicit {
+        return Ok((result.as_market_result(), "manual_request".to_string()));
+    }
+
+    let now = Utc::now();
+    for candidate in state.engine.get_last_candidates().await {
+        if candidate.ticker != ticker || candidate.close_time > now {
+            continue;
+        }
+        if let Some(result) = candidate.result {
+            return Ok((result, "daemon_candidates".to_string()));
+        }
+    }
+
+    match state.historical_store.get_historical_market(ticker).await {
+        Ok(Some(row)) => {
+            let close_time = row.close_time.parse::<DateTime<Utc>>().map_err(|e| {
+                redeem_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("failed to parse historical close_time for {ticker}: {e}"),
+                )
+            })?;
+            if close_time > now {
+                return Err(redeem_error(
+                    StatusCode::CONFLICT,
+                    format!("position is not resolved yet: {ticker}"),
+                ));
+            }
+            if let Some(result) = row.result.as_deref().and_then(parse_market_result) {
+                return Ok((result, "historical_store".to_string()));
+            }
+            Err(redeem_error(
+                StatusCode::CONFLICT,
+                format!("no resolved result available for {ticker}"),
+            ))
+        }
+        Ok(None) => Err(redeem_error(
+            StatusCode::CONFLICT,
+            format!("no resolved result available for {ticker}"),
+        )),
+        Err(err) => Err(redeem_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            err.to_string(),
+        )),
+    }
+}
+
+fn parse_market_result(value: &str) -> Option<MarketResult> {
+    match value.trim().to_lowercase().as_str() {
+        "yes" => Some(MarketResult::Yes),
+        "no" => Some(MarketResult::No),
+        "cancelled" | "canceled" => Some(MarketResult::Cancelled),
+        _ => None,
+    }
+}
+
+fn position_redeem_response(result: crate::engine::ManualRedeemResult) -> PositionRedeemResponse {
+    PositionRedeemResponse {
+        ticker: result.ticker,
+        side: format!("{:?}", result.side),
+        quantity_redeemed: result.quantity_redeemed,
+        settlement_price: result.settlement_price.to_f64().unwrap_or(0.0),
+        market_result: PositionRedeemOutcome::from_market_result(result.market_result),
+        payout: result.payout.to_f64().unwrap_or(0.0),
+        pnl: result.pnl.and_then(|pnl| pnl.to_f64()),
+        cash_after: result.cash_after.to_f64().unwrap_or(0.0),
+        timestamp: result.timestamp.to_rfc3339(),
+        result_source: result.result_source,
+    }
+}
+
+fn redeem_error(
+    status: StatusCode,
+    error: impl Into<String>,
+) -> (StatusCode, Json<PositionRedeemErrorResponse>) {
+    (
+        status,
+        Json(PositionRedeemErrorResponse {
+            error: error.into(),
+        }),
+    )
 }
 
 pub async fn get_trades(State(state): State<Arc<AppState>>) -> Json<Vec<TradeResponse>> {

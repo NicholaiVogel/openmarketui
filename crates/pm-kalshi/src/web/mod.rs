@@ -213,8 +213,16 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/portfolio", get(handlers::get_portfolio))
         .route("/api/positions", get(handlers::get_positions))
         .route(
+            "/api/positions/redeem",
+            post(handlers::post_positions_redeem),
+        )
+        .route(
             "/api/positions/{ticker}/close",
             post(handlers::post_position_close),
+        )
+        .route(
+            "/api/positions/{ticker}/redeem",
+            post(handlers::post_position_redeem),
         )
         .route("/api/trades", get(handlers::get_trades))
         .route("/api/equity", get(handlers::get_equity))

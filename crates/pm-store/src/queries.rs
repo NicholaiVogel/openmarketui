@@ -1113,6 +1113,21 @@ impl SqliteStore {
 
     // === historical data queries (for backtesting) ===
 
+    /// Get one historical market by ticker.
+    pub async fn get_historical_market(
+        &self,
+        ticker: &str,
+    ) -> anyhow::Result<Option<HistoricalMarketRow>> {
+        let row = sqlx::query_as::<_, HistoricalMarketRow>(
+            "SELECT ticker, title, category, open_time, close_time, result \
+             FROM historical_markets WHERE ticker = ?1",
+        )
+        .bind(ticker)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row)
+    }
+
     /// Get all markets active during a time range
     pub async fn get_historical_markets_in_range(
         &self,
@@ -1694,5 +1709,39 @@ mod tests {
             .await
             .expect("recent sessions fetch");
         assert_eq!(recent.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn fetches_historical_market_by_ticker() {
+        let file = NamedTempFile::new().expect("temp db");
+        let store = SqliteStore::new(file.path().to_str().expect("utf8 path"))
+            .await
+            .expect("store opens");
+
+        store
+            .upsert_historical_market(
+                "KXTEST",
+                "Test market",
+                "test",
+                "2024-01-01T00:00:00Z",
+                "2024-01-02T00:00:00Z",
+                Some("yes"),
+            )
+            .await
+            .expect("market upserts");
+
+        let market = store
+            .get_historical_market("KXTEST")
+            .await
+            .expect("market fetch works")
+            .expect("market exists");
+        assert_eq!(market.ticker, "KXTEST");
+        assert_eq!(market.result.as_deref(), Some("yes"));
+
+        let missing = store
+            .get_historical_market("MISSING")
+            .await
+            .expect("missing fetch works");
+        assert!(missing.is_none());
     }
 }

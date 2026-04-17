@@ -94,6 +94,9 @@ The richer operator surface is already inside the daemon/web layer, especially
 GET  /api/status
 GET  /api/portfolio
 GET  /api/positions
+POST /api/positions/{ticker}/close
+POST /api/positions/redeem
+POST /api/positions/{ticker}/redeem
 GET  /api/trades
 GET  /api/equity
 GET  /api/circuit-breaker
@@ -163,9 +166,13 @@ As of 2026-04-17, the first Rust `omu` slice is in place:
 - Added redacted auth command parity through `omu auth add|status|rotate` and
   `GET /api/auth/status`. The CLI stores credential metadata locally, never
   prints raw key IDs, and reports daemon live-auth readiness separately.
+- Added position redeem controls through `POST /api/positions/redeem`,
+  `POST /api/positions/{ticker}/redeem`, and `omu positions redeem`. Bulk
+  redeem only claims positions with a daemon-candidate or historical-store
+  result; manual ticker redeem is confirmation-gated and audit-recorded by the
+  CLI.
 
-The next major parity gaps are position redeem controls and OpenTelemetry trace
-propagation.
+The next major parity gap is OpenTelemetry trace propagation.
 
 ## Architecture target
 
@@ -279,7 +286,7 @@ This maps Phase One CLI commands to the current Watchtower or daemon surface.
 | `omu positions list` | Show open positions | `/api/positions` | Existing. |
 | `omu positions show <ticker>` | Drill into one position | List endpoint only | Add filter/show endpoint or client-side filter. |
 | `omu positions close <ticker>` | Close a position | `POST /api/positions/{ticker}/close` | Implemented for paper positions. Destructive, requires `--yes`, records audit. |
-| `omu positions redeem` | Redeem resolved positions | Not relevant for Kalshi Phase One maybe | Defer or implement after live mode details. |
+| `omu positions redeem` | Redeem resolved positions | `POST /api/positions/redeem`, `POST /api/positions/{ticker}/redeem` | Implemented for daemon-candidate or historical-store resolutions and manual paper settlement by ticker. |
 | `omu trades list` | Recent fills | `/api/trades` | Existing. |
 | `omu trades show <id>` | Fill detail with entry reasoning | No id in response | Add fill IDs and decision linkage. |
 | `omu markets list` | Last candidate markets | `/api/markets` | Existing, limited. |
@@ -649,10 +656,9 @@ Until then, `omu sessions create --mode live` should return a stable
 
 Keep the short path and close the remaining trust gates:
 
-1. Add position redeem controls once Kalshi live-mode semantics are clear.
-2. Add OpenTelemetry spans and trace IDs across CLI commands, daemon handlers,
+1. Add OpenTelemetry spans and trace IDs across CLI commands, daemon handlers,
    session lifecycle, backtests, and execution.
-3. Continue aligning REST and WebSocket response shapes so Watchtower and `omu`
+2. Continue aligning REST and WebSocket response shapes so Watchtower and `omu`
    stay attached to the same source of truth.
 
 This keeps the system honest: one daemon, two attached operator surfaces, no
